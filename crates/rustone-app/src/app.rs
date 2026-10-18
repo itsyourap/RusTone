@@ -46,8 +46,7 @@ pub struct App {
     tray_status: Option<Status>,
     requests: Requests,
     pub sip: Sip,
-    /// Passwords; used by the account editor.
-    _secrets: Box<dyn SecretStore>,
+    secrets: Box<dyn SecretStore>,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -89,7 +88,7 @@ impl App {
             tray_status: None,
             requests,
             sip,
-            _secrets: secrets,
+            secrets,
             rendering: fastframe_text::detect(),
             next: Closed::Quit,
             quit_requested: false,
@@ -142,6 +141,35 @@ impl App {
 
     pub fn status(&self) -> Status {
         self.sip.status(&self.settings)
+    }
+
+    /// Saves an account (new when its id is 0) and its password. Returns its id.
+    pub fn save_account(&mut self, mut account: rustone_core::account::Account) -> u32 {
+        let id = if account.id == 0 {
+            self.settings.add_account(account.clone())
+        } else {
+            self.settings.update_account(account.clone());
+            account.id
+        };
+        account.id = id;
+        if let Err(e) = self.secrets.set(&account.secret_key(), &account.password) {
+            log::warn!("cannot store the password for account {id}: {e}");
+        }
+        // The stored copy keeps the password in memory for the engine.
+        if let Some(slot) = self.settings.accounts.iter_mut().find(|a| a.id == id) {
+            slot.password = account.password;
+        }
+        self.mark_settings_dirty();
+        id
+    }
+
+    pub fn delete_account(&mut self, id: u32) {
+        if let Some(account) = self.settings.remove_account(id) {
+            if let Err(e) = self.secrets.delete(&account.secret_key()) {
+                log::warn!("cannot remove the password for account {id}: {e}");
+            }
+            self.mark_settings_dirty();
+        }
     }
 
     /// Pushes settings changes to the engine and engine events to the tray.

@@ -1,5 +1,5 @@
-//! The settings page. Phase 1 covers appearance and window behaviour; the
-//! full settings arrive in Phase 8.
+//! The settings page: accounts, appearance and window behaviour. The full
+//! Settings arrive in Phase 8.
 
 use egui::Ui;
 use rustone_core::settings::ThemePreference;
@@ -15,13 +15,16 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.heading("Settings");
         ui.add_space(8.0);
 
+        super::accounts::list(ui, app, p);
+        ui.add_space(12.0);
+
         section_title(ui, p, "Appearance");
         card(ui, p, |ui| {
             setting_stack(ui, p, "Theme", Some("System follows the Windows light/dark setting"), |ui| {
                 let options = [
-                    (ThemePreference::System, Icon::Monitor, "System"),
-                    (ThemePreference::Light, Icon::Sun, "Light"),
-                    (ThemePreference::Dark, Icon::Moon, "Dark"),
+                    (ThemePreference::System, Some(Icon::Monitor), "System"),
+                    (ThemePreference::Light, Some(Icon::Sun), "Light"),
+                    (ThemePreference::Dark, Some(Icon::Moon), "Dark"),
                 ];
                 if widgets::segmented(ui, p, &mut app.settings.ui.theme, &options) {
                     app.mark_settings_dirty();

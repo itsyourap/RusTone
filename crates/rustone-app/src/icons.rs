@@ -27,6 +27,13 @@ fastframe_icons::icons! {
         Info => lucide "info",
         Lock => lucide "lock",
         ExternalLink => lucide "external-link",
+        Eye => lucide "eye",
+        EyeOff => lucide "eye-off",
+        Plus => lucide "plus",
+        Pencil => lucide "pencil",
+        Trash => lucide "trash-2",
+        Check => lucide "check",
+        Smartphone => lucide "smartphone",
     }
 }
 

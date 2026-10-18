@@ -1,5 +1,6 @@
 //! The window's layout: header, page, bottom navigation.
 
+mod accounts;
 mod dialer;
 mod settings;
 mod widgets;
@@ -25,6 +26,8 @@ pub enum Page {
     Contacts,
     Messages,
     Settings,
+    /// The account editor (reached from Settings).
+    Account,
 }
 
 /// Per-window UI state, reset when the window is rebuilt.
@@ -32,6 +35,7 @@ pub enum Page {
 pub struct UiState {
     pub page: Page,
     pub dialer: dialer::DialerState,
+    pub account_draft: Option<accounts::Draft>,
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App) {
@@ -58,6 +62,7 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
             Page::Contacts => widgets::empty_state(ui, &p, Icon::Users, "No contacts", "Contacts and their presence appear here."),
             Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
             Page::Settings => settings::show(ui, app, &p),
+            Page::Account => accounts::editor(ui, app, &p),
         });
 
     if fastframe_titlebar::enabled() {
@@ -84,9 +89,10 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
-            let settings_tint = if app.ui.page == Page::Settings { p.accent } else { p.secondary };
+            let in_settings = matches!(app.ui.page, Page::Settings | Page::Account);
+            let settings_tint = if in_settings { p.accent } else { p.secondary };
             if widgets::icon_button(ui, p, Icon::Settings, settings_tint, "Settings").clicked() {
-                app.ui.page = if app.ui.page == Page::Settings { Page::Dialer } else { Page::Settings };
+                app.ui.page = if in_settings { Page::Dialer } else { Page::Settings };
             }
         });
     });

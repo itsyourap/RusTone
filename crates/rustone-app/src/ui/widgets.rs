@@ -99,7 +99,7 @@ pub fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool, label: &str) -> Response 
 }
 
 /// A row of mutually exclusive choices. Returns true when the value changed.
-pub fn segmented<T: Copy + PartialEq>(ui: &mut Ui, p: &Palette, value: &mut T, options: &[(T, Icon, &str)]) -> bool {
+pub fn segmented<T: Copy + PartialEq>(ui: &mut Ui, p: &Palette, value: &mut T, options: &[(T, Option<Icon>, &str)]) -> bool {
     let mut changed = false;
     let frame = egui::Frame::new().fill(p.surface).corner_radius(CornerRadius::same(RADIUS)).inner_margin(3);
     frame.show(ui, |ui| {
@@ -112,15 +112,18 @@ pub fn segmented<T: Copy + PartialEq>(ui: &mut Ui, p: &Palette, value: &mut T, o
                 let selected = *value == *option;
                 let text_color = if selected { p.text } else { p.secondary };
                 let galley = ui.painter().layout_no_wrap(label.to_string(), Weight::Medium.font_id(13.0), text_color);
-                let size = vec2(galley.size().x + 40.0, 28.0);
+                let icon_room = if icon.is_some() { 22.0 } else { 0.0 };
+                let size = vec2(galley.size().x + icon_room + 22.0, 28.0);
                 let (rect, response) = ui.allocate_exact_size(size, Sense::click());
                 response.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, selected, *label));
                 let t = hover_t(ui, &response);
                 let bg = if selected { p.window } else { p.surface_hover.gamma_multiply(t) };
                 ui.painter().rect_filled(rect, CornerRadius::same(RADIUS - 2), bg);
-                let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(15.0));
-                icon.image(text_color, 15.0).paint_at(ui, icon_rect);
-                ui.painter().galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), galley, text_color);
+                if let Some(icon) = icon {
+                    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(15.0));
+                    icon.image(text_color, 15.0).paint_at(ui, icon_rect);
+                }
+                ui.painter().galley(egui::pos2(rect.left() + 11.0 + icon_room, rect.center().y - galley.size().y / 2.0), galley, text_color);
                 if response.clicked() && !selected {
                     *value = *option;
                     changed = true;
@@ -202,4 +205,61 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
     Color32::from_rgba_premultiplied(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()), mix(a.a(), b.a()))
+}
+
+/// A labelled single-line text field filling the width.
+pub fn text_field(ui: &mut Ui, p: &Palette, label: &str, hint: &str, value: &mut String) -> Response {
+    let label_id = field_label(ui, p, label);
+    let edit = egui::TextEdit::singleline(value)
+        .hint_text(egui::RichText::new(hint).color(p.dim))
+        .desired_width(f32::INFINITY)
+        .margin(egui::Margin::symmetric(10, 7));
+    ui.add(edit).labelled_by(label_id)
+}
+
+/// A password field with a show/hide button.
+pub fn password_field(ui: &mut Ui, p: &Palette, label: &str, value: &mut String, shown: &mut bool) -> Response {
+    let label_id = field_label(ui, p, label);
+    ui.horizontal(|ui| {
+        let reveal_width = 34.0 + ui.spacing().item_spacing.x;
+        let edit = egui::TextEdit::singleline(value)
+            .password(!*shown)
+            .desired_width(ui.available_width() - reveal_width)
+            .margin(egui::Margin::symmetric(10, 7));
+        let response = ui.add(edit).labelled_by(label_id);
+        let (icon, tip) = if *shown { (Icon::EyeOff, "Hide password") } else { (Icon::Eye, "Show password") };
+        if icon_button(ui, p, icon, p.secondary, tip).clicked() {
+            *shown = !*shown;
+        }
+        response
+    })
+    .inner
+}
+
+/// A labelled whole-number field.
+pub fn number_field(ui: &mut Ui, p: &Palette, label: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>, unit: &str) -> Response {
+    let label_id = field_label(ui, p, label);
+    ui.add(egui::DragValue::new(value).range(range).suffix(unit).speed(1.0)).labelled_by(label_id)
+}
+
+/// Returns the label's id, so the field can be `labelled_by` it.
+fn field_label(ui: &mut Ui, p: &Palette, label: &str) -> egui::Id {
+    ui.add_space(2.0);
+    ui.label(egui::RichText::new(label).size(12.0).color(p.secondary)).id
+}
+
+/// A one-line galley that ends in `…` when it doesn't fit.
+pub fn elided(ui: &Ui, text: String, font: egui::FontId, color: Color32, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text, font, color);
+    job.wrap = egui::text::TextWrapping { max_width: width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    ui.painter().layout_job(job)
+}
+
+/// A full-width filled button.
+pub fn primary_button(ui: &mut Ui, p: &Palette, text: &str, fill: Color32) -> Response {
+    let button = egui::Button::new(egui::RichText::new(text).color(p.on_accent).font(Weight::SemiBold.font_id(14.0)))
+        .fill(fill)
+        .corner_radius(CornerRadius::same(RADIUS))
+        .min_size(vec2(0.0, 36.0));
+    ui.add(button)
 }
