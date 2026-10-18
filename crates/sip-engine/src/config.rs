@@ -32,6 +32,8 @@ pub struct EngineConfig {
     pub local_account: bool,
     /// Full pjsua log including SIP messages.
     pub log_file: Option<PathBuf>,
+    /// Use no sound device (tests, headless use).
+    pub null_audio: bool,
 }
 
 impl Default for EngineConfig {
@@ -50,6 +52,7 @@ impl Default for EngineConfig {
             opus_stereo: false,
             local_account: false,
             log_file: None,
+            null_audio: false,
         }
     }
 }

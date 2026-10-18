@@ -1,19 +1,46 @@
 //! pjsua callbacks. They run on pjsua's worker threads, copy what they need
 //! into owned [`Event`]s, and never unwind into C.
 
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::RwLock;
 
 use pjsua_sys::*;
 
+use super::calls::{self, ToneKey};
 use super::util::{error_text, pj_to_string};
-use crate::{Event, RegState, Sink};
+use crate::call::{CallState, DtmfMethod};
+use crate::{Event, Message, RegState, Sink};
 
 static SINK: RwLock<Option<Sink>> = RwLock::new(None);
 /// pjsua id of the main (registering) account, or -1.
 static MAIN_ACCOUNT: AtomicI32 = AtomicI32::new(PJSUA_INVALID_ID);
+
+/// The engine thread's queue, for callbacks that need it to act.
+static ENGINE_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<Message>>> = std::sync::Mutex::new(None);
+
+/// Call options that change without a restart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CallOptions {
+    pub dtmf_method: DtmfMethod,
+    /// Play DTMF digits locally.
+    pub local_dtmf: bool,
+}
+
+static OPTIONS: RwLock<CallOptions> = RwLock::new(CallOptions { dtmf_method: DtmfMethod::Auto, local_dtmf: true });
+
+pub fn set_engine_tx(tx: Option<std::sync::mpsc::Sender<Message>>) {
+    *ENGINE_TX.lock().unwrap_or_else(|e| e.into_inner()) = tx;
+}
+
+pub fn set_options(options: CallOptions) {
+    *OPTIONS.write().unwrap_or_else(|e| e.into_inner()) = options;
+}
+
+pub fn options() -> CallOptions {
+    *OPTIONS.read().unwrap_or_else(|e| e.into_inner())
+}
 
 pub fn install_sink(sink: Sink) {
     *SINK.write().unwrap_or_else(|e| e.into_inner()) = Some(sink);
@@ -107,6 +134,99 @@ fn reg_state(info: &pjsua_reg_info, param: &pjsip_regc_cbparam) -> RegState {
         reason = error_text(param.status);
     }
     RegState::Failed { code, reason, detail: registrar_error(info) }
+}
+
+pub unsafe extern "C" fn on_incoming_call(_acc_id: pjsua_acc_id, call_id: pjsua_call_id, rdata: *mut pjsip_rx_data) {
+    guard(|| {
+        calls::capture_headers(call_id, rdata);
+        if let Some(info) = calls::call_info(call_id) {
+            emit(Event::IncomingCall(info));
+        }
+    });
+}
+
+pub unsafe extern "C" fn on_call_state(call_id: pjsua_call_id, _e: *mut pjsip_event) {
+    guard(|| {
+        let Some(info) = calls::call_info(call_id) else { return };
+        // The 481 that follows a replaced call is ignored.
+        if info.state == CallState::Disconnected && info.status_code == 481 {
+            calls::forget_call(call_id);
+            return;
+        }
+        let ended = info.state == CallState::Disconnected;
+        emit(Event::Call(info));
+        if ended {
+            calls::forget_call(call_id);
+        }
+    });
+}
+
+pub unsafe extern "C" fn on_call_media_state(call_id: pjsua_call_id) {
+    guard(|| {
+        calls::update_media(call_id);
+        if let Some(info) = calls::call_info(call_id) {
+            emit(Event::Call(info));
+        }
+    });
+}
+
+pub unsafe extern "C" fn on_dtmf_digit(call_id: pjsua_call_id, digit: c_int) {
+    guard(|| {
+        let Some(digit) = u8::try_from(digit).ok().map(char::from) else { return };
+        if options().local_dtmf {
+            calls::play_digits(ToneKey::Local, &digit.to_string());
+        }
+        emit(Event::DtmfReceived { call: call_id, digit });
+    });
+}
+
+/// Declines (603) transfers of unconfirmed calls, and transfers to
+/// a party already in a call with us.
+pub unsafe extern "C" fn on_call_transfer_request2(call_id: pjsua_call_id, dst: *const pj_str_t, code: *mut pjsip_status_code, _opt: *mut pjsua_call_setting) {
+    guard(|| {
+        // SAFETY: valid for the duration of the callback.
+        let target = if dst.is_null() { String::new() } else { pj_to_string(unsafe { &*dst }) };
+        let confirmed = calls::call_info(call_id).is_some_and(|i| i.state == CallState::Confirmed);
+        let target_key = calls::uri_user_host(&target);
+        let duplicate = calls::call_ids().into_iter().filter(|&id| id != call_id).any(|id| {
+            calls::call_info(id).is_some_and(|i| calls::uri_user_host(&i.remote) == target_key)
+        });
+        if (!confirmed || duplicate) && !code.is_null() {
+            unsafe { *code = 603 };
+        }
+        log::info!("transfer request for call {call_id} ({})", if confirmed && !duplicate { "accepted" } else { "declined" });
+    });
+}
+
+pub unsafe extern "C" fn on_call_transfer_status(call_id: pjsua_call_id, st_code: c_int, st_text: *const pj_str_t, final_: pj_bool_t, p_cont: *mut pj_bool_t) {
+    guard(|| {
+        let text = if st_text.is_null() { String::new() } else { pj_to_string(unsafe { &*st_text }) };
+        let code = u16::try_from(st_code).unwrap_or(0);
+        let success = (200..300).contains(&code);
+        emit(Event::TransferStatus { call: call_id, code, text, done: final_ != 0 || success });
+        // Transferred: stop following and hang up our leg.
+        if success {
+            if !p_cont.is_null() {
+                unsafe { *p_cont = PJ_FALSE };
+            }
+            unsafe { pjsua_call_hangup(call_id, 0, std::ptr::null(), std::ptr::null()) };
+        }
+    });
+}
+
+pub unsafe extern "C" fn on_call_redirected(_call_id: pjsua_call_id, _target: *const pjsip_uri, _e: *const pjsip_event) -> pjsip_redirect_op {
+    PJSIP_REDIRECT_ACCEPT_REPLACE
+}
+
+/// A non-looping sound finished: ask the engine thread to destroy the player
+/// (players can't be destroyed from their own callback).
+pub unsafe extern "C" fn on_player_eof(_port: *mut pjmedia_port, user_data: *mut c_void) {
+    guard(|| {
+        let id = user_data as isize as pjsua_player_id;
+        if let Some(tx) = ENGINE_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = tx.send(Message::PlayerEnded(id));
+        }
+    });
 }
 
 /// The server's `P-Registrar-Error`, shown for rejected registrations.

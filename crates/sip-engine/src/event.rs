@@ -1,5 +1,7 @@
 //! What the engine reports to the application.
 
+use crate::call::{CallId, CallInfo};
+
 /// Events are delivered on pjsua's worker threads or the engine thread; the
 /// sink must be cheap and must not block (queue them and wake the UI).
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +14,19 @@ pub enum Event {
     Stopped,
     /// The main account's registration changed.
     Registration(RegState),
+    /// A new incoming call, before any response (the application answers
+    /// with 180 or rejects it).
+    IncomingCall(CallInfo),
+    /// A call's state or media changed.
+    Call(CallInfo),
+    /// `Command::MakeCall` failed before a call existed.
+    CallFailed { target: String, reason: String },
+    /// An RFC 2833 digit from the remote.
+    DtmfReceived { call: CallId, digit: char },
+    /// Progress of a transfer we started (REFER NOTIFYs).
+    TransferStatus { call: CallId, code: u16, text: String, done: bool },
+    /// A call command failed (hold, transfer, DTMF...).
+    CallError { call: Option<CallId>, reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

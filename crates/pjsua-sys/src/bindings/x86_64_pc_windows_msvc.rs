@@ -9111,6 +9111,9 @@ impl Default for pjmedia_vid_stream_info {
         }
     }
 }
+pub const PJMEDIA_FILE_NO_LOOP: pjmedia_file_player_option = 1;
+pub const PJMEDIA_FILE_NO_LOCK: pjmedia_file_player_option = 2;
+pub type pjmedia_file_player_option = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct pjmedia_wav_player_info {
@@ -9141,6 +9144,15 @@ impl Default for pjmedia_wav_player_info {
             s.assume_init()
         }
     }
+}
+unsafe extern "C" {
+    pub fn pjmedia_wav_player_set_eof_cb2(
+        port: *mut pjmedia_port,
+        user_data: *mut ::std::os::raw::c_void,
+        cb: ::std::option::Option<
+            unsafe extern "C" fn(port: *mut pjmedia_port, usr_data: *mut ::std::os::raw::c_void),
+        >,
+    ) -> pj_status_t;
 }
 pub const PJSIP_INV_STATE_NULL: pjsip_inv_state = 0;
 pub const PJSIP_INV_STATE_CALLING: pjsip_inv_state = 1;

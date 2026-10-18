@@ -7,6 +7,7 @@
 //!
 //! pjsua is a process-wide singleton, so only one [`Engine`] can exist.
 
+mod call;
 mod config;
 mod event;
 mod pj;
@@ -16,8 +17,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
+pub use call::{CallId, CallInfo, CallState, Direction, DtmfMethod, MediaState, Sound};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
+pub use pj::CallOptions;
 
 /// Receives engine events. Called from pjsua's threads: keep it short.
 pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
@@ -38,10 +41,37 @@ pub enum Command {
     Suspend,
     /// The machine woke up: start pjsua again with the same settings.
     Resume,
+
+    /// Options that apply without a restart (DTMF method, local DTMF).
+    SetCallOptions(CallOptions),
+    /// Call `target` (a number or SIP URI) from the main account, or from
+    /// the local account when `local` is set.
+    MakeCall { target: String, video: bool, local: bool },
+    /// Respond to an incoming call: 180 to ring, 200 to answer, 486 to
+    /// decline, 487 to ignore a duplicate.
+    Answer { call: CallId, code: u16, video: bool },
+    /// End a call (CANCEL, BYE or 603 as fits its state).
+    Hangup(CallId),
+    HangupAll,
+    Hold(CallId),
+    Unhold(CallId),
+    /// Mute the microphone and/or the speaker (levels, all calls).
+    SetMute { mic: bool, speaker: bool },
+    SendDtmf { call: CallId, digits: String, method: DtmfMethod },
+    /// Play digits on the local speaker only (keypad feedback).
+    PlayLocalDigits(String),
+    /// Blind transfer to a number or SIP URI.
+    Transfer { call: CallId, target: String },
+    /// Attended transfer: join `call`'s party with `with`'s.
+    AttendedTransfer { call: CallId, with: CallId },
+    PlaySound(Sound),
+    StopSound,
 }
 
-enum Message {
+pub(crate) enum Message {
     Command(Box<Command>),
+    /// A non-looping sound finished (from a media thread).
+    PlayerEnded(i32),
     Shutdown,
 }
 
@@ -80,10 +110,11 @@ impl Engine {
         }
         let sink: Sink = Arc::new(sink);
         let (tx, rx) = mpsc::channel();
+        let engine_tx = tx.clone();
         let thread = std::thread::Builder::new()
             .name("sip-engine".into())
             .spawn(move || {
-                run(config, sink, rx);
+                run(config, sink, rx, engine_tx);
                 RUNNING.store(false, Ordering::SeqCst);
             })
             .map_err(|e| {
@@ -110,15 +141,26 @@ impl Drop for Engine {
 
 /// The engine thread: owns the pjsua session and the wanted accounts, so a
 /// restart or resume brings them back.
-fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>) {
+fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>) {
     pj::install_sink(sink.clone());
+    pj::set_engine_tx(Some(tx));
     let mut account: Option<AccountConfig> = None;
     let mut local: Option<LocalAccountConfig> = None;
     let mut session = start(&config, &sink);
     let mut suspended = false;
 
-    while let Ok(Message::Command(command)) = rx.recv() {
-        match *command {
+    loop {
+        let command = match rx.recv() {
+            Ok(Message::Command(command)) => *command,
+            Ok(Message::PlayerEnded(id)) => {
+                if let Some(s) = &mut session {
+                    s.sound_ended(id);
+                }
+                continue;
+            }
+            Ok(Message::Shutdown) | Err(_) => break,
+        };
+        match command {
             Command::Restart(new_config) => {
                 config = new_config;
                 stop(&mut session, &sink);
@@ -161,10 +203,59 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>) {
                 }
                 suspended = false;
             }
+            Command::SetCallOptions(options) => pj::set_options(options),
+            other => match &mut session {
+                Some(s) => call_command(s, other, &sink),
+                None => {
+                    if let Command::MakeCall { target, .. } = other {
+                        sink(Event::CallFailed { target, reason: "the SIP engine isn't running".into() });
+                    }
+                }
+            },
         }
     }
     stop(&mut session, &sink);
+    pj::set_engine_tx(None);
     pj::remove_sink();
+}
+
+/// Commands that need a running session.
+fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
+    let call_error = |call: Option<CallId>, result: Result<(), String>| {
+        if let Err(reason) = result {
+            log::warn!("{reason}");
+            sink(Event::CallError { call, reason });
+        }
+    };
+    match command {
+        Command::MakeCall { target, video, local } => {
+            if let Err(reason) = s.make_call(&target, video, local) {
+                log::warn!("call failed: {reason}");
+                sink(Event::CallFailed { target, reason });
+            }
+        }
+        Command::Answer { call, code, video } => call_error(Some(call), s.answer(call, code, video)),
+        Command::Hangup(call) => s.hangup(call, 0),
+        Command::HangupAll => s.hangup_all(),
+        Command::Hold(call) => call_error(Some(call), s.hold(call)),
+        Command::Unhold(call) => call_error(Some(call), s.unhold(call)),
+        Command::SetMute { mic, speaker } => s.set_mute(mic, speaker),
+        Command::SendDtmf { call, digits, method } => call_error(Some(call), s.send_dtmf(call, &digits, method)),
+        Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),
+        Command::Transfer { call, target } => call_error(Some(call), s.transfer(call, &target)),
+        Command::AttendedTransfer { call, with } => call_error(Some(call), s.attended_transfer(call, with)),
+        Command::PlaySound(sound) => call_error(None, s.play_sound(&sound)),
+        Command::StopSound => s.stop_sound(),
+        // Handled by the engine loop.
+        Command::Restart(_)
+        | Command::SetAccount(_)
+        | Command::SetLocalAccount(_)
+        | Command::Reregister
+        | Command::IpChanged
+        | Command::Suspend
+        | Command::Resume
+        | Command::SetCallOptions(_) => {}
+    }
 }
 
 fn start(config: &EngineConfig, sink: &Sink) -> Option<pj::Session> {

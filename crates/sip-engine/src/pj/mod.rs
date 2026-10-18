@@ -2,17 +2,20 @@
 //! runs on the engine thread.
 
 mod callbacks;
+mod calls;
 mod util;
 
 use std::ffi::{c_int, c_uint};
 
 use pjsua_sys::*;
 
-pub use callbacks::{install_sink, remove_sink};
+pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_options};
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
+use crate::call::{CallId, DtmfMethod, Sound};
 use crate::config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 use crate::{Event, RegState, Sink};
+use calls::ToneKey;
 
 const MAX_STUN: usize = 8;
 const MAX_NAMESERVERS: usize = 4;
@@ -27,7 +30,10 @@ pub struct Session {
     rtp_port_min: u16,
     rtp_port_max: u16,
     account: pjsua_acc_id,
+    /// The main account's settings, for building call URIs.
+    account_config: Option<AccountConfig>,
     local_account: pjsua_acc_id,
+    player: Option<calls::Player>,
     stopped: bool,
 }
 
@@ -44,7 +50,9 @@ impl Session {
             rtp_port_min: cfg.rtp_port_min,
             rtp_port_max: cfg.rtp_port_max,
             account: PJSUA_INVALID_ID,
+            account_config: None,
             local_account: PJSUA_INVALID_ID,
+            player: None,
             stopped: false,
         };
         match session.init(cfg) {
@@ -80,6 +88,13 @@ impl Session {
         ua.nameserver_count = cfg.nameservers.len().min(MAX_NAMESERVERS) as c_uint;
         ua.cb.on_reg_started2 = Some(callbacks::on_reg_started2);
         ua.cb.on_reg_state2 = Some(callbacks::on_reg_state2);
+        ua.cb.on_incoming_call = Some(callbacks::on_incoming_call);
+        ua.cb.on_call_state = Some(callbacks::on_call_state);
+        ua.cb.on_call_media_state = Some(callbacks::on_call_media_state);
+        ua.cb.on_dtmf_digit = Some(callbacks::on_dtmf_digit);
+        ua.cb.on_call_transfer_request2 = Some(callbacks::on_call_transfer_request2);
+        ua.cb.on_call_transfer_status = Some(callbacks::on_call_transfer_status);
+        ua.cb.on_call_redirected = Some(callbacks::on_call_redirected);
 
         pj_default!(log: pjsua_logging_config = pjsua_logging_config_default);
         log.cb = Some(callbacks::on_log);
@@ -106,6 +121,10 @@ impl Session {
         check(unsafe { pjsua_init(&ua, &log, &media) }, "pjsua_init")?;
         self.create_transports(cfg);
         check(unsafe { pjsua_start() }, "pjsua_start")?;
+        if cfg.null_audio {
+            // SAFETY: pjsua is running.
+            check(unsafe { pjsua_set_null_snd_dev() }, "selecting no sound device")?;
+        }
         self.set_audio_codecs(&cfg.audio_codecs);
         log::info!("SIP engine started");
         Ok(())
@@ -175,6 +194,7 @@ impl Session {
             unsafe { pjsua_acc_del(self.account) };
             self.account = PJSUA_INVALID_ID;
         }
+        self.account_config = account.cloned();
         let Some(account) = account else {
             sink(Event::Registration(RegState::Unregistered));
             return;
@@ -347,6 +367,145 @@ impl Session {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Calls
+
+    /// The URI to call for `target`: SIP URIs as given; numbers through the
+    /// main account's rules, or straight to the host
+    /// for the local account.
+    fn target_uri(&self, target: &str, local: bool) -> Result<String, String> {
+        let target = target.trim();
+        if target.is_empty() {
+            return Err("nothing to call".into());
+        }
+        let lower = target.to_ascii_lowercase();
+        if lower.starts_with("sip:") || lower.starts_with("sips:") || target.starts_with('<') {
+            return Ok(target.to_owned());
+        }
+        if local {
+            return Ok(format!("<sip:{target}>"));
+        }
+        match &self.account_config {
+            Some(account) => Ok(account.sip_uri(target)),
+            None => Err("no account to call from".into()),
+        }
+    }
+
+    pub fn make_call(&mut self, target: &str, video: bool, local: bool) -> Result<CallId, String> {
+        let acc = if local { self.local_account } else { self.account };
+        if acc == PJSUA_INVALID_ID {
+            return Err(if local { "the local account is off".into() } else { "no account to call from".into() });
+        }
+        let uri = self.target_uri(target, local)?;
+        pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
+        opt.vid_cnt = c_uint::from(video);
+        let dst = self.arena.pj(&uri);
+        let mut id = PJSUA_INVALID_ID;
+        // SAFETY: `opt` initialised in place; `dst` lives in the arena.
+        check(unsafe { pjsua_call_make_call(acc, &dst, &opt, std::ptr::null_mut(), std::ptr::null(), &mut id) }, "calling")?;
+        Ok(id)
+    }
+
+    /// Sends a provisional or final response to an incoming call (180, 200,
+    /// 486...). 200 answers with audio, plus video when asked.
+    pub fn answer(&self, call: CallId, code: u16, video: bool) -> Result<(), String> {
+        pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
+        opt.vid_cnt = c_uint::from(video);
+        // SAFETY: `opt` initialised in place.
+        check(unsafe { pjsua_call_answer2(call, &opt, c_uint::from(code), std::ptr::null(), std::ptr::null()) }, "answering")
+    }
+
+    /// Ends a call; with code 0 pjsua picks CANCEL, BYE or 603.
+    pub fn hangup(&self, call: CallId, code: u16) {
+        // SAFETY: plain pjsua call; an unknown id just fails.
+        unsafe { pjsua_call_hangup(call, c_uint::from(code), std::ptr::null(), std::ptr::null()) };
+    }
+
+    pub fn hangup_all(&self) {
+        // SAFETY: plain pjsua call.
+        unsafe { pjsua_call_hangup_all() };
+    }
+
+    pub fn hold(&self, call: CallId) -> Result<(), String> {
+        // SAFETY: plain pjsua call.
+        check(unsafe { pjsua_call_set_hold(call, std::ptr::null()) }, "holding the call")
+    }
+
+    pub fn unhold(&self, call: CallId) -> Result<(), String> {
+        // SAFETY: plain pjsua call.
+        check(unsafe { pjsua_call_reinvite(call, PJSUA_CALL_UNHOLD as c_uint, std::ptr::null()) }, "resuming the call")
+    }
+
+    /// Sends DTMF; plays the
+    /// digits locally when they couldn't be sent and local DTMF is on.
+    pub fn send_dtmf(&mut self, call: CallId, digits: &str, method: DtmfMethod) -> Result<(), String> {
+        let active = calls::call_info(call).is_some_and(|i| i.media == crate::MediaState::Active);
+        let sent = active
+            && match method {
+                DtmfMethod::InBand => calls::play_digits(ToneKey::Call(call), digits),
+                DtmfMethod::SipInfo => calls::send_dtmf_info(call, digits),
+                DtmfMethod::Rfc2833 => self.dial_rfc2833(call, digits).is_ok(),
+                DtmfMethod::Auto => self.dial_rfc2833(call, digits).is_ok() || calls::play_digits(ToneKey::Call(call), digits),
+            };
+        if !sent && callbacks::options().local_dtmf {
+            calls::play_digits(ToneKey::Local, digits);
+        }
+        if sent { Ok(()) } else { Err("the digits couldn't be sent".into()) }
+    }
+
+    fn dial_rfc2833(&mut self, call: CallId, digits: &str) -> Result<(), String> {
+        let d = self.arena.pj(digits);
+        // SAFETY: `d` lives in the arena.
+        check(unsafe { pjsua_call_dial_dtmf(call, &d) }, "sending DTMF")
+    }
+
+    /// Key-press feedback on the local speaker (dialer keypad).
+    pub fn play_local_digits(&self, digits: &str) {
+        if callbacks::options().local_dtmf {
+            calls::play_digits(ToneKey::Local, digits);
+        }
+    }
+
+    pub fn set_mute(&self, mic: bool, speaker: bool) {
+        calls::set_mute(mic, speaker);
+    }
+
+    /// Blind transfer (REFER) to `target`.
+    pub fn transfer(&mut self, call: CallId, target: &str) -> Result<(), String> {
+        let uri = self.target_uri(target, false)?;
+        let dest = self.arena.pj(&uri);
+        // SAFETY: `dest` lives in the arena.
+        check(unsafe { pjsua_call_xfer(call, &dest, std::ptr::null()) }, "transferring the call")
+    }
+
+    /// Attended transfer: connects `call`'s party with `other`'s.
+    pub fn attended_transfer(&self, call: CallId, other: CallId) -> Result<(), String> {
+        // SAFETY: plain pjsua call (options 0).
+        check(unsafe { pjsua_call_xfer_replaces(call, other, 0, std::ptr::null()) }, "transferring the call")
+    }
+
+    // -----------------------------------------------------------------------
+    // Sounds
+
+    pub fn play_sound(&mut self, sound: &Sound) -> Result<(), String> {
+        self.stop_sound();
+        self.player = Some(calls::Player::start(&sound.path, sound.looping, sound.level, callbacks::on_player_eof)?);
+        Ok(())
+    }
+
+    pub fn stop_sound(&mut self) {
+        if let Some(player) = self.player.take() {
+            player.stop();
+        }
+    }
+
+    /// A non-looping sound reached its end.
+    pub fn sound_ended(&mut self, player_id: pjsua_player_id) {
+        if self.player.as_ref().is_some_and(|p| p.id() == player_id) {
+            self.stop_sound();
+        }
+    }
+
     /// Destroys pjsua. Accounts are unregistered first (pjsua waits briefly).
     pub fn stop(mut self) {
         self.destroy();
@@ -357,6 +516,8 @@ impl Session {
             return;
         }
         callbacks::set_main_account(PJSUA_INVALID_ID);
+        self.stop_sound();
+        calls::drop_all_tonegens();
         // SAFETY: on the engine thread; pjsua was created by `start`.
         unsafe { pjsua_destroy() };
         log::info!("SIP engine stopped");

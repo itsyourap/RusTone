@@ -137,6 +137,8 @@ impl Sip {
                     }
                     self.reg = state;
                 }
+                // Calls are handled from the next step on.
+                _ => {}
             }
         }
         changed
@@ -194,6 +196,7 @@ pub fn engine_config(sip: &SipSettings, local: &LocalAccount, log_file: &std::pa
         opus_stereo: sip.opus_stereo,
         local_account: local.enabled,
         log_file: sip.enable_log.then(|| log_file.to_path_buf()),
+        null_audio: false,
     }
 }
 

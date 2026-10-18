@@ -130,9 +130,9 @@ mod regen {
             .allowlist_function(
                 "pj_str|pj_strerror|pj_thread_register|pj_thread_is_registered|pj_log_.*",
             )
-            .allowlist_function("pjmedia_aud_dev_refresh|pjmedia_vid_dev_refresh|pjmedia_tonegen_.*|pjmedia_port_destroy|pj_pool_release")
+            .allowlist_function("pjmedia_aud_dev_refresh|pjmedia_vid_dev_refresh|pjmedia_tonegen_.*|pjmedia_port_destroy|pj_pool_release|pjmedia_wav_player_set_eof_cb2")
             .allowlist_type("pjsua_.*|pj_constants_|pjsip_status_code|pjsip_inv_state")
-            .allowlist_type("pjsip_cfg_t|pjsip_cred_data_type|pj_log_decoration|pjmedia_tone_digit|pjmedia_tone_desc")
+            .allowlist_type("pjsip_cfg_t|pjsip_cred_data_type|pj_log_decoration|pjmedia_tone_digit|pjmedia_tone_desc|pjmedia_file_player_option|pjmedia_dir")
             .allowlist_var("PJMEDIA_TONEGEN_.*|PJMEDIA_RTP_EREMNORFC2833|PJSIP_EBUSY")
             .allowlist_var("PJSUA_.*|PJ_INVALID_SOCKET|PJ_LOG_.*")
             .default_enum_style(bindgen::EnumVariation::Consts)
