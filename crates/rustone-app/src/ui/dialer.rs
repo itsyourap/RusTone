@@ -29,6 +29,8 @@ fn number_id() -> egui::Id {
     egui::Id::new("dialer-number")
 }
 const KEY_GAP: f32 = 18.0;
+/// Seconds the backspace button must be held to clear the whole number.
+const HOLD_TO_CLEAR: f64 = 0.6;
 
 #[derive(Debug, Default)]
 pub struct DialerState {
@@ -92,7 +94,7 @@ pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool)
             });
             ui.add_enabled_ui(!state.number.is_empty(), |ui| {
                 let erase = widgets::round_icon_button(ui, KEY_SIZE, p.window, Icon::Backspace, p.secondary, "Delete (hold to clear)");
-                if erase.long_touched() || erase.secondary_clicked() {
+                if erase.long_touched() || erase.secondary_clicked() || held_long(ui, &erase) {
                     edit_at_cursor(ui, &mut state.number, |_, _| (String::new(), 0));
                 } else if erase.clicked() {
                     edit_at_cursor(ui, &mut state.number, delete_back);
@@ -107,6 +109,20 @@ pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool)
 fn centre_row(ui: &mut Ui, keys: usize) {
     let width = keys as f32 * KEY_SIZE + (keys - 1) as f32 * KEY_GAP;
     ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+}
+
+/// True once the mouse has been held down on `response` for
+/// [`HOLD_TO_CLEAR`] seconds. `long_touched` only covers touch screens.
+fn held_long(ui: &Ui, response: &egui::Response) -> bool {
+    if !response.is_pointer_button_down_on() {
+        return false;
+    }
+    let held = ui.input(|i| i.pointer.press_start_time().map_or(0.0, |t| i.time - t));
+    if held < HOLD_TO_CLEAR {
+        // Wake up when the hold is long enough, even if the mouse is still.
+        ui.ctx().request_repaint_after_secs((HOLD_TO_CLEAR - held) as f32);
+    }
+    held >= HOLD_TO_CLEAR
 }
 
 /// Applies a keypad edit at the number field's cursor (or selection), then
@@ -200,6 +216,7 @@ fn number_field(ui: &mut Ui, p: &Palette, state: &mut DialerState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::kittest::Queryable;
 
     /// The user's example: 1, 2, click between them, 3 → "132", cursor after 3.
     #[test]
@@ -219,7 +236,48 @@ mod tests {
     /// The same example through the real widgets, with pointer clicks.
     #[test]
     fn clicking_between_digits_moves_the_insertion_point() {
-        use egui_kittest::kittest::Queryable;
+        let mut harness = dialer_harness();
+        harness.get_by_label("1").click();
+        harness.run();
+        harness.get_by_label("2").click();
+        harness.run();
+        assert_eq!(harness.state().number, "12");
+        // "12" is centred, so the field's centre is between the digits.
+        harness.get_by_label("Number").click();
+        harness.run();
+        harness.get_by_label("3").click();
+        harness.run();
+        assert_eq!(harness.state().number, "132");
+        let cursor = egui::text_edit::TextEditState::load(&harness.ctx, number_id()).and_then(|s| s.cursor.char_range());
+        assert_eq!(cursor.map(|r| r.primary.index.0), Some(2), "cursor after the 3");
+    }
+
+    #[test]
+    fn backspace_click_deletes_one_and_holding_clears() {
+        let mut harness = dialer_harness();
+        for key in ["1", "2", "3"] {
+            harness.get_by_label(key).click();
+            harness.run();
+        }
+        harness.get_by_label("Delete (hold to clear)").click();
+        harness.run();
+        assert_eq!(harness.state().number, "12");
+
+        let pos = harness.get_by_label("Delete (hold to clear)").rect().center();
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        harness.hover_at(pos);
+        harness.event(button(true));
+        harness.step();
+        assert_eq!(harness.state().number, "12", "a short press doesn't clear yet");
+        harness.run_steps(4); // 1 s at the harness's 0.25 s per step
+        assert_eq!(harness.state().number, "", "cleared while still held");
+        harness.event(button(false));
+        harness.run();
+        assert_eq!(harness.state().number, "");
+    }
+
+    /// The dialer in a test harness, with the app's fonts and icons.
+    fn dialer_harness() -> egui_kittest::Harness<'static, DialerState> {
         let mut ready = false;
         let mut harness = egui_kittest::Harness::builder().with_size([475.0, 760.0]).build_ui_state(
             move |ui, state: &mut DialerState| {
@@ -236,19 +294,7 @@ mod tests {
             DialerState::default(),
         );
         harness.run();
-        harness.get_by_label("1").click();
-        harness.run();
-        harness.get_by_label("2").click();
-        harness.run();
-        assert_eq!(harness.state().number, "12");
-        // "12" is centred, so the field's centre is between the digits.
-        harness.get_by_label("Number").click();
-        harness.run();
-        harness.get_by_label("3").click();
-        harness.run();
-        assert_eq!(harness.state().number, "132");
-        let cursor = egui::text_edit::TextEditState::load(&harness.ctx, number_id()).and_then(|s| s.cursor.char_range());
-        assert_eq!(cursor.map(|r| r.primary.index.0), Some(2), "cursor after the 3");
+        harness
     }
 
     #[test]
