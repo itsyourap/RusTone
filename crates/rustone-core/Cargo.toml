@@ -10,5 +10,10 @@ publish.workspace = true
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 
+keyring-core = "1"
+
 [lints.rust]
 unsafe_code = "forbid"
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1"

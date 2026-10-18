@@ -9,12 +9,73 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::account::{Account, LocalAccount};
+
 pub const FILE_NAME: &str = "settings.toml";
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub ui: UiSettings,
+    pub sip: SipSettings,
+    /// Id of the account in use (one account at a time).
+    pub active_account: Option<u32>,
+    pub accounts: Vec<Account>,
+    pub local_account: LocalAccount,
+}
+
+/// Global SIP and media settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SipSettings {
+    /// Empty: "RusTone/<version>".
+    pub user_agent: String,
+    pub rport: bool,
+    pub source_port: u16,
+    pub rtp_port_min: u16,
+    pub rtp_port_max: u16,
+    pub enable_stun: bool,
+    /// STUN servers, separated by spaces, commas or semicolons.
+    pub stun: String,
+    pub dns_srv: bool,
+    /// DNS servers for SRV lookups, separated like `stun`.
+    pub dns_srv_ns: String,
+    /// Re-create transports and re-register when the network changes.
+    pub network_changes: bool,
+    /// Enabled audio codecs in priority order, space-separated.
+    pub audio_codecs: String,
+    pub vad: bool,
+    pub ec: bool,
+    pub opus_stereo: bool,
+    /// Write the full SIP log (holds numbers and addresses).
+    pub enable_log: bool,
+}
+
+impl Default for SipSettings {
+    fn default() -> Self {
+        Self {
+            user_agent: String::new(),
+            rport: true,
+            source_port: 0,
+            rtp_port_min: 0,
+            rtp_port_max: 0,
+            enable_stun: false,
+            stun: String::new(),
+            dns_srv: false,
+            dns_srv_ns: String::new(),
+            network_changes: true,
+            audio_codecs: "PCMA/8000/1 PCMU/8000/1".into(),
+            vad: false,
+            ec: true,
+            opus_stereo: false,
+            enable_log: false,
+        }
+    }
+}
+
+/// Splits a server list (`;`, `,` or whitespace separated).
+pub fn split_list(list: &str) -> Vec<String> {
+    list.split(|c: char| c == ';' || c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()).map(str::to_owned).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +143,48 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 impl Settings {
+    pub fn active(&self) -> Option<&Account> {
+        let id = self.active_account?;
+        self.accounts.iter().find(|a| a.id == id)
+    }
+
+    pub fn account(&self, id: u32) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == id)
+    }
+
+    /// Adds `account` with a fresh id and returns the id. The first account
+    /// becomes the active one.
+    pub fn add_account(&mut self, mut account: Account) -> u32 {
+        let id = self.accounts.iter().map(|a| a.id).max().map_or(1, |m| m + 1);
+        account.id = id;
+        self.accounts.push(account);
+        if self.active_account.is_none() {
+            self.active_account = Some(id);
+        }
+        id
+    }
+
+    /// Replaces the account with the same id. Returns false if there is none.
+    pub fn update_account(&mut self, account: Account) -> bool {
+        match self.accounts.iter_mut().find(|a| a.id == account.id) {
+            Some(slot) => {
+                *slot = account;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes an account; if it was active, the first remaining one takes over.
+    pub fn remove_account(&mut self, id: u32) -> Option<Account> {
+        let index = self.accounts.iter().position(|a| a.id == id)?;
+        let removed = self.accounts.remove(index);
+        if self.active_account == Some(id) {
+            self.active_account = self.accounts.first().map(|a| a.id);
+        }
+        Some(removed)
+    }
+
     /// Reads `path`. A missing file gives the defaults.
     pub fn load(path: &Path) -> Result<Self, LoadError> {
         match std::fs::read_to_string(path) {
@@ -125,6 +228,42 @@ mod tests {
     fn missing_file_is_default() {
         let s = Settings::load(Path::new("definitely/not/here/settings.toml")).unwrap();
         assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn accounts_add_update_remove() {
+        let mut s = Settings::default();
+        let a = s.add_account(Account { username: "a".into(), ..Account::default() });
+        let b = s.add_account(Account { username: "b".into(), ..Account::default() });
+        assert_eq!((a, b), (1, 2));
+        assert_eq!(s.active().unwrap().username, "a");
+        let mut edited = s.account(b).unwrap().clone();
+        edited.label = "B".into();
+        assert!(s.update_account(edited));
+        s.remove_account(a);
+        assert_eq!(s.active().unwrap().label, "B");
+        s.remove_account(b);
+        assert_eq!(s.active_account, None);
+        // Ids aren't reused while accounts exist, so stored passwords don't mix.
+        let c = s.add_account(Account::default());
+        assert_eq!(c, 1);
+    }
+
+    #[test]
+    fn accounts_round_trip_without_passwords() {
+        let mut s = Settings::default();
+        s.add_account(Account { username: "1001".into(), password: "pw".into(), ..Account::default() });
+        let text = s.to_toml();
+        assert!(!text.contains("pw\""), "{text}");
+        let back = Settings::from_toml(&text).unwrap();
+        assert_eq!(back.active().unwrap().username, "1001");
+        assert!(back.active().unwrap().password.is_empty());
+    }
+
+    #[test]
+    fn server_lists_split_on_separators() {
+        assert_eq!(split_list("stun.a.com:3478; stun.b.com,stun.c.com  "), ["stun.a.com:3478", "stun.b.com", "stun.c.com"]);
+        assert!(split_list(" ").is_empty());
     }
 
     #[test]
