@@ -1,0 +1,16 @@
+[package]
+name = "rustone-cli"
+description = "Phase 0 spike: register and call through pjproject from Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+pjsua-sys.workspace = true
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
