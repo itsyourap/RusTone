@@ -76,6 +76,7 @@ pub unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
         let bytes = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len.max(0) as usize) };
         let text = String::from_utf8_lossy(bytes);
         let text = strip_timestamp(text.trim_end());
+        super::debug::log_line(level, text);
         match level {
             ..=1 => log::error!(target: "sip_engine::pjsua", "{text}"),
             2 => log::warn!(target: "sip_engine::pjsua", "{text}"),
@@ -157,6 +158,7 @@ pub unsafe extern "C" fn on_call_state(call_id: pjsua_call_id, _e: *mut pjsip_ev
         emit(Event::Call(info));
         if ended {
             calls::forget_call(call_id);
+            super::debug::call_ended(call_id);
         }
     });
 }

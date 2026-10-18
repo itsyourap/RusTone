@@ -168,6 +168,7 @@ pub fn update_media(call_id: CallId) {
         if matches!(info.media, MediaState::Active | MediaState::RemoteHold) {
             pjsua_conf_connect(slot, 0);
             pjsua_conf_connect(0, slot);
+            super::debug::tap_call(slot);
         } else {
             pjsua_conf_disconnect(slot, 0);
             pjsua_conf_disconnect(0, slot);

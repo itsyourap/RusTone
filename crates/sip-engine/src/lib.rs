@@ -9,6 +9,7 @@
 
 mod call;
 mod config;
+pub mod debug;
 mod event;
 mod pj;
 
@@ -66,6 +67,9 @@ pub enum Command {
     AttendedTransfer { call: CallId, with: CallId },
     PlaySound(Sound),
     StopSound,
+    /// Collect stream statistics and audio for the debug window, and raise
+    /// pjsua's log level (SIP messages and logs are always collected).
+    SetDebug(bool),
 }
 
 pub(crate) enum Message {
@@ -99,6 +103,7 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 pub struct Engine {
     tx: Sender<Message>,
     thread: Option<JoinHandle<()>>,
+    debug: Arc<debug::DebugFeed>,
 }
 
 impl Engine {
@@ -109,6 +114,8 @@ impl Engine {
             return Err(SpawnError::AlreadyRunning);
         }
         let sink: Sink = Arc::new(sink);
+        let feed = Arc::new(debug::DebugFeed::default());
+        pj::debug::set_feed(Some(feed.clone()));
         let (tx, rx) = mpsc::channel();
         let engine_tx = tx.clone();
         let thread = std::thread::Builder::new()
@@ -121,7 +128,12 @@ impl Engine {
                 RUNNING.store(false, Ordering::SeqCst);
                 SpawnError::Thread(e)
             })?;
-        Ok(Self { tx, thread: Some(thread) })
+        Ok(Self { tx, thread: Some(thread), debug: feed })
+    }
+
+    /// The debug window's data (SIP messages, logs, streams, audio).
+    pub fn debug_feed(&self) -> Arc<debug::DebugFeed> {
+        self.debug.clone()
     }
 
     pub fn send(&self, command: Command) {
@@ -136,6 +148,7 @@ impl Drop for Engine {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        pj::debug::set_feed(None);
     }
 }
 
@@ -148,9 +161,25 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut local: Option<LocalAccountConfig> = None;
     let mut session = start(&config, &sink);
     let mut suspended = false;
+    let mut debug_on = false;
 
     loop {
-        let command = match rx.recv() {
+        // While debugging, wake once a second to sample stream statistics.
+        let received = if debug_on {
+            match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if session.is_some() {
+                        pj::debug::poll_streams();
+                    }
+                    continue;
+                }
+                Ok(message) => Ok(message),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Err(mpsc::RecvError),
+            }
+        } else {
+            rx.recv()
+        };
+        let command = match received {
             Ok(Message::Command(command)) => *command,
             Ok(Message::PlayerEnded(id)) => {
                 if let Some(s) = &mut session {
@@ -166,6 +195,9 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 stop(&mut session, &sink);
                 session = start(&config, &sink);
                 add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
+                if debug_on && session.is_some() {
+                    pj::debug::apply(true);
+                }
                 suspended = false;
             }
             Command::SetAccount(new) => {
@@ -204,6 +236,13 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetDebug(on) => {
+                debug_on = on;
+                pj::debug::feed_enabled(on);
+                if session.is_some() {
+                    pj::debug::apply(on);
+                }
+            }
             other => match &mut session {
                 Some(s) => call_command(s, other, &sink),
                 None => {
@@ -254,7 +293,8 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::IpChanged
         | Command::Suspend
         | Command::Resume
-        | Command::SetCallOptions(_) => {}
+        | Command::SetCallOptions(_)
+        | Command::SetDebug(_) => {}
     }
 }
 

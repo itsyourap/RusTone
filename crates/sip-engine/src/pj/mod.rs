@@ -3,6 +3,7 @@
 
 mod callbacks;
 mod calls;
+pub mod debug;
 mod util;
 
 use std::ffi::{c_int, c_uint};
@@ -98,7 +99,8 @@ impl Session {
 
         pj_default!(log: pjsua_logging_config = pjsua_logging_config_default);
         log.cb = Some(callbacks::on_log);
-        log.console_level = 3;
+        // Everything pjsua logs reaches the callback (for the debug window).
+        log.console_level = 5;
         log.msg_logging = PJ_TRUE;
         match &cfg.log_file {
             Some(path) => {
@@ -109,6 +111,7 @@ impl Session {
             }
             None => log.level = 3,
         }
+        debug::set_base_log_level(log.level as c_int);
 
         pj_default!(media: pjsua_media_config = pjsua_media_config_default);
         media.no_vad = (!cfg.vad).into();
@@ -119,6 +122,7 @@ impl Session {
 
         // SAFETY: the configs and the arena's strings outlive the call.
         check(unsafe { pjsua_init(&ua, &log, &media) }, "pjsua_init")?;
+        debug::install_message_tap();
         self.create_transports(cfg);
         check(unsafe { pjsua_start() }, "pjsua_start")?;
         if cfg.null_audio {
@@ -518,6 +522,8 @@ impl Session {
         callbacks::set_main_account(PJSUA_INVALID_ID);
         self.stop_sound();
         calls::drop_all_tonegens();
+        debug::remove_taps();
+        debug::remove_message_tap();
         // SAFETY: on the engine thread; pjsua was created by `start`.
         unsafe { pjsua_destroy() };
         log::info!("SIP engine stopped");

@@ -107,6 +107,20 @@ fn call_to_self_over_the_local_account() {
         &|c| c.id == incoming.id && c.media == MediaState::Active,
     ]);
 
+    // The debug feed saw the exchange and samples the stream while on.
+    let feed = engine.debug_feed();
+    let labels: Vec<String> = feed.messages().iter().map(|m| m.label()).collect();
+    assert!(labels.iter().any(|l| l == "INVITE rustone-test" || l.starts_with("INVITE")), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "180 Ringing · INVITE"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "200 OK · INVITE"), "{labels:?}");
+    engine.send(Command::SetDebug(true));
+    std::thread::sleep(Duration::from_millis(2500));
+    let streams = feed.streams();
+    assert!(!streams.is_empty(), "stream statistics while debugging");
+    assert_eq!(streams[0].latest.codec, "PCMU");
+    assert!(!feed.logs().is_empty());
+    engine.send(Command::SetDebug(false));
+
     // RFC 2833 digits arrive on the other leg.
     engine.send(Command::SendDtmf { call: out.id, digits: "5".into(), method: DtmfMethod::Rfc2833 });
     wait_for(&rx, "DTMF 5", |e| matches!(e, Event::DtmfReceived { call, digit: '5' } if *call == incoming.id));
