@@ -30,6 +30,8 @@ macro_rules! pj_default {
 static LOG: Mutex<String> = Mutex::new(String::new());
 static ECHO_SIP: AtomicBool = AtomicBool::new(false);
 static AUTO_ANSWER: AtomicBool = AtomicBool::new(false);
+/// Set by `on_reg_state2` when an unregistration has completed.
+static UNREGISTERED: AtomicBool = AtomicBool::new(false);
 
 const POLL: Duration = Duration::from_millis(200);
 const RING_TIMEOUT: Duration = Duration::from_secs(60);
@@ -49,6 +51,7 @@ pub struct Options {
 pub fn run(cfg: &Config, opts: &Options, stop: &AtomicBool) -> (Result<()>, String) {
     ECHO_SIP.store(opts.echo_sip, Ordering::Relaxed);
     AUTO_ANSWER.store(opts.answer, Ordering::Relaxed);
+    UNREGISTERED.store(false, Ordering::Relaxed);
     LOG.lock().unwrap().clear();
 
     let mut arena = Arena::default();
@@ -85,9 +88,8 @@ unsafe fn session(cfg: &Config, opts: &Options, stop: &AtomicBool, arena: &mut A
 
         println!("[reg] unregistering");
         pjsua_acc_set_registration(acc_id, PJ_FALSE);
-        wait_until(SHUTDOWN_TIMEOUT, &AtomicBool::new(false), || {
-            acc_info(acc_id, |i| i.status != 0 && !is_registered(i)).unwrap_or(false)
-        });
+        // Wait for the result so pjsua_destroy() doesn't start a second one.
+        wait_until(SHUTDOWN_TIMEOUT, &AtomicBool::new(false), || UNREGISTERED.load(Ordering::Relaxed));
     }
     Ok(())
 }
@@ -328,8 +330,12 @@ unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
     });
 }
 
-unsafe extern "C" fn on_reg_state2(acc_id: pjsua_acc_id, _info: *mut pjsua_reg_info) {
+unsafe extern "C" fn on_reg_state2(acc_id: pjsua_acc_id, info: *mut pjsua_reg_info) {
     guard(|| {
+        // `renew` is zero when this callback reports an unregistration.
+        if !info.is_null() && unsafe { (*info).renew } == 0 {
+            UNREGISTERED.store(true, Ordering::Relaxed);
+        }
         acc_info(acc_id, |i| {
             println!("[reg] {} {} (expires {})", i.status, pj_to_string(&i.status_text), i.expires as i32);
         });
