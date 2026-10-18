@@ -1,6 +1,6 @@
 //! What the engine reports to the application.
 
-use crate::call::{CallId, CallInfo};
+use crate::call::{CallId, CallInfo, CodecInfo};
 
 /// Events are delivered on pjsua's worker threads or the engine thread; the
 /// sink must be cheap and must not block (queue them and wake the UI).
@@ -8,6 +8,8 @@ use crate::call::{CallId, CallInfo};
 pub enum Event {
     /// pjsua is running (after start, restart or resume).
     Started,
+    /// The audio codecs pjsua has, with their priorities (after start).
+    Codecs(Vec<CodecInfo>),
     /// pjsua could not start; the engine waits for a new configuration.
     Failed(String),
     /// pjsua was shut down (suspend, or before a restart).

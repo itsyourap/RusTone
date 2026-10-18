@@ -27,6 +27,16 @@ fn engine_lifecycle() {
     })
     .expect("engine starts");
     wait_for(&rx, Duration::from_secs(10), "Started", |e| *e == Event::Started);
+    // The engine lists its codecs; AMR comes from pjproject's OpenCORE build.
+    let codecs = match wait_for(&rx, Duration::from_secs(5), "Codecs", |e| matches!(e, Event::Codecs(_))) {
+        Event::Codecs(c) => c,
+        _ => unreachable!(),
+    };
+    let ids: Vec<&str> = codecs.iter().map(|c| c.id.as_str()).collect();
+    for wanted in ["AMR-WB/16000/1", "AMR/8000/1", "PCMA/8000/1", "PCMU/8000/1"] {
+        assert!(ids.contains(&wanted), "{wanted} missing from {ids:?}");
+    }
+    assert!(codecs.iter().filter(|c| c.priority > 0).all(|c| c.id.starts_with("PCM")), "only the configured codecs are enabled: {codecs:?}");
 
     assert!(matches!(Engine::spawn(EngineConfig::default(), |_| {}), Err(sip_engine::SpawnError::AlreadyRunning)));
 

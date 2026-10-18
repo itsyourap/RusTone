@@ -81,6 +81,15 @@ pub struct CallInfo {
     pub diversion: Option<String>,
 }
 
+/// An audio codec pjsua offers, e.g. `AMR-WB/16000/1`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodecInfo {
+    /// pjsua's codec id: `name/clock-rate/channels`.
+    pub id: String,
+    /// 0 = disabled; higher is preferred.
+    pub priority: u8,
+}
+
 /// A sound to play through the call audio device.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sound {

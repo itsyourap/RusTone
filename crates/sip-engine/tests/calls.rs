@@ -113,6 +113,10 @@ fn call_to_self_over_the_local_account() {
     assert!(labels.iter().any(|l| l == "INVITE rustone-test" || l.starts_with("INVITE")), "{labels:?}");
     assert!(labels.iter().any(|l| l == "180 Ringing · INVITE"), "{labels:?}");
     assert!(labels.iter().any(|l| l == "200 OK · INVITE"), "{labels:?}");
+    // Offers carry audio only (no RFC 4103 text stream).
+    let invite = feed.messages().into_iter().find(|m| m.is_request() && m.method() == "INVITE").expect("INVITE captured");
+    assert!(invite.body().contains("m=audio"), "{}", invite.raw);
+    assert!(!invite.body().contains("m=text"), "{}", invite.raw);
     engine.send(Command::SetDebug(true));
     std::thread::sleep(Duration::from_millis(2500));
     let streams = feed.streams();

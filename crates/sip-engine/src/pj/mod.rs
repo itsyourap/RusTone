@@ -13,7 +13,7 @@ use pjsua_sys::*;
 pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_options};
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
-use crate::call::{CallId, DtmfMethod, Sound};
+use crate::call::{CallId, CodecInfo, DtmfMethod, Sound};
 use crate::config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 use crate::{Event, RegState, Sink};
 use calls::ToneKey;
@@ -188,6 +188,20 @@ impl Session {
                 status => log::warn!("codec {name} unavailable: {}", error_text(status)),
             }
         }
+    }
+
+    /// Every audio codec pjsua has, preferred first, with its priority.
+    pub fn codecs(&self) -> Vec<CodecInfo> {
+        let mut infos: [pjsua_codec_info; 64] = unsafe { std::mem::zeroed() };
+        let mut count = infos.len() as c_uint;
+        // SAFETY: pjsua fills at most `count` entries; ids point into them.
+        if unsafe { pjsua_enum_codecs(infos.as_mut_ptr(), &mut count) } != PJ_SUCCESS {
+            return Vec::new();
+        }
+        let mut codecs: Vec<CodecInfo> =
+            infos[..count as usize].iter().map(|i| CodecInfo { id: pj_to_string(&i.codec_id), priority: i.priority }).collect();
+        codecs.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
+        codecs
     }
 
     /// Replaces the main account.
@@ -403,6 +417,9 @@ impl Session {
         let uri = self.target_uri(target, local)?;
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
+        // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
+        // offers have none.
+        opt.txt_cnt = 0;
         let dst = self.arena.pj(&uri);
         let mut id = PJSUA_INVALID_ID;
         // SAFETY: `opt` initialised in place; `dst` lives in the arena.
@@ -415,6 +432,9 @@ impl Session {
     pub fn answer(&self, call: CallId, code: u16, video: bool) -> Result<(), String> {
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
+        // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
+        // offers have none.
+        opt.txt_cnt = 0;
         // SAFETY: `opt` initialised in place.
         check(unsafe { pjsua_call_answer2(call, &opt, c_uint::from(code), std::ptr::null(), std::ptr::null()) }, "answering")
     }

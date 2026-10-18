@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
-pub use call::{CallId, CallInfo, CallState, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
+pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
 pub use pj::CallOptions;
@@ -302,6 +302,7 @@ fn start(config: &EngineConfig, sink: &Sink) -> Option<pj::Session> {
     match pj::Session::start(config) {
         Ok(session) => {
             sink(Event::Started);
+            sink(Event::Codecs(session.codecs()));
             Some(session)
         }
         Err(e) => {
