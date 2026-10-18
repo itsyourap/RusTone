@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pjsua-sys", "crates/rustone-cli"]
+members = ["crates/pjsua-sys", "crates/rustone-core", "crates/rustone-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,40 @@ publish = false
 
 [workspace.dependencies]
 pjsua-sys = { path = "crates/pjsua-sys" }
+rustone-core = { path = "crates/rustone-core" }
+
+egui = "0.36.1"
+eframe = { version = "0.36.1", default-features = false, features = ["glow", "accesskit", "default_fonts", "wayland", "x11"] }
+egui_extras = { version = "0.36.1", default-features = false, features = ["svg"] }
+log = "0.4"
+
+# fastframe: every crate from the same tag (see https://fastframe.dev).
+fastframe-shell = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-tray = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-instance = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-titlebar = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-log = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-dirs = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-file = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
 
 [profile.release]
 debug = "line-tables-only"
+
+# fastframe apps build against these egui/winit forks, which carry Windows
+# fixes (multi-monitor DPI resize, focus crash) not yet released upstream.
+# Revisions from fastframe v0.10.0's README; move egui and winit together.
+[patch.crates-io]
+ecolor = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+eframe = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui-winit = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui_extras = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui_glow = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+emath = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+epaint = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+winit = { git = "https://github.com/crmne/winit", rev = "ed7caa9023f10b397f5b6ec8284a840cbd8a6f65" }
