@@ -20,8 +20,48 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::{pjsip_cfg_t, pjsip_rx_data, pjsua_reg_info};
-    use std::ffi::{c_char, c_int};
+    use super::{pj_pool_t, pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_reg_info};
+    use std::ffi::{c_char, c_int, c_short, c_uint};
+
+    /// Called for every SIP message sent (`is_rx` 0) or received (1).
+    pub type MsgCallback =
+        unsafe extern "C" fn(is_rx: c_int, buf: *const c_char, len: usize, remote: *const c_char, port: c_int, transport: *const c_char);
+
+    /// Called with each audio frame a tap receives.
+    pub type TapCallback = unsafe extern "C" fn(tap_id: c_int, samples: *const c_short, count: usize, clock_rate: c_uint);
+
+    /// `jf_stream_snapshot` from the shim: one audio stream's statistics.
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct StreamSnapshot {
+        pub codec: [c_char; 32],
+        pub clock_rate: c_uint,
+        pub channels: c_uint,
+        pub remote: [c_char; 64],
+        pub duration_ms: c_uint,
+        pub tx_pkt: c_uint,
+        pub tx_bytes: c_uint,
+        pub rx_pkt: c_uint,
+        pub rx_bytes: c_uint,
+        pub rx_loss: c_uint,
+        pub rx_discard: c_uint,
+        pub rx_dup: c_uint,
+        pub rx_reorder: c_uint,
+        pub rx_jitter_last_us: c_uint,
+        pub rx_jitter_mean_us: c_uint,
+        pub rx_jitter_max_us: c_uint,
+        pub tx_loss: c_uint,
+        pub tx_jitter_last_us: c_uint,
+        pub rtt_last_us: c_uint,
+        pub rtt_mean_us: c_uint,
+        pub jb_frame_ms: c_uint,
+        pub jb_size: c_uint,
+        pub jb_prefetch: c_uint,
+        pub jb_avg_delay_ms: c_uint,
+        pub jb_lost: c_uint,
+        pub jb_discard: c_uint,
+        pub jb_empty: c_uint,
+    }
 
     unsafe extern "C" {
         /// Equivalent of `pjsip_cfg()`: global SIP stack settings.
@@ -45,6 +85,18 @@ pub mod shim {
             buf: *mut c_char,
             buf_len: usize,
         ) -> c_int;
+
+        /// Registers the SIP message tap module (after pjsua_init).
+        pub fn jf_msg_tap_install(cb: MsgCallback) -> pj_status_t;
+        /// Unregisters it (before pjsua_destroy).
+        pub fn jf_msg_tap_remove();
+
+        /// Statistics of the call's first audio stream.
+        pub fn jf_call_stream_snapshot(call_id: pjsua_call_id, out: *mut StreamSnapshot) -> pj_status_t;
+        pub fn jf_sizeof_jf_stream_snapshot() -> usize;
+
+        /// Adds an audio tap to the conference bridge; returns its slot or -1.
+        pub fn jf_tap_add(tap_id: c_int, cb: TapCallback, p_pool: *mut *mut pj_pool_t, p_port: *mut *mut pjmedia_port) -> c_int;
 
         pub fn jf_sizeof_pjsua_config() -> usize;
         pub fn jf_sizeof_pjsua_media_config() -> usize;
@@ -80,6 +132,7 @@ mod tests {
             assert_eq!(size_of::<pjsua_call_info>(), shim::jf_sizeof_pjsua_call_info());
             assert_eq!(size_of::<pjsua_call_setting>(), shim::jf_sizeof_pjsua_call_setting());
             assert_eq!(size_of::<pjsua_codec_info>(), shim::jf_sizeof_pjsua_codec_info());
+            assert_eq!(size_of::<shim::StreamSnapshot>(), shim::jf_sizeof_jf_stream_snapshot());
         }
     }
 

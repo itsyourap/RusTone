@@ -80,6 +80,7 @@ fn build_shim(pj_dir: &Path, deps_dir: &Path) {
     println!("cargo:rerun-if-changed=shim");
     cc::Build::new()
         .file("shim/jf_shim.c")
+        .file("shim/jf_debug.c")
         .includes(include_dirs(pj_dir, deps_dir))
         .define("NDEBUG", None)
         .static_crt(true)
