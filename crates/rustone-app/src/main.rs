@@ -83,6 +83,7 @@ fn main() -> ExitCode {
         .filter("warn,rustone=info,sip_engine=info")
         .file(dirs.state.join("rustone.log"))
         .panic_log(dirs.state.join("panic.log"))
+        .redact(sip::app_log_tap)
         .init()
     {
         eprintln!("logging unavailable: {e}");

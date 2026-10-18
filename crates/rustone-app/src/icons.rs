@@ -43,6 +43,14 @@ fastframe_icons::icons! {
         Transfer => "phone-forwarded",
         AddCall => "user-plus",
         Close => lucide "x",
+        Dashboard => "layout-dashboard",
+        Logs => "scroll-text",
+        Network => "arrow-left-right",
+        Activity => "activity",
+        Waveform => "audio-waveform",
+        Bug => "bug",
+        Outgoing => "arrow-up-right",
+        Incoming => "arrow-down-left",
     }
 }
 

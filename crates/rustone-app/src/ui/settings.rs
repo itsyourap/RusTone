@@ -93,6 +93,18 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
 
         ui.add_space(12.0);
+        section_title(ui, p, "Developer");
+        card(ui, p, |ui| {
+            setting_row(ui, p, "Debug window", Some("Logs, SIP messages, RTP statistics and audio graphs (Ctrl+Shift+D)"), |ui| {
+                let label = if app.debug.open { "Close" } else { "Open" };
+                if ui.button(label).clicked() {
+                    let open = !app.debug.open;
+                    crate::ui::debug::set_open(app, open);
+                }
+            });
+        });
+
+        ui.add_space(12.0);
         section_title(ui, p, "About");
         card(ui, p, |ui| {
             setting_row(ui, p, &format!("RusTone {}", env!("CARGO_PKG_VERSION")), Some("pjproject 2.17 · egui · fastframe"), |_| {});

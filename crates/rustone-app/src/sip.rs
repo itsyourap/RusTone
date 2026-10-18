@@ -2,11 +2,13 @@
 //! the UI.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::borrow::Cow;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
 use rustone_core::settings::{Settings, SipSettings, split_list};
+use sip_engine::debug::{DebugFeed, LogSource};
 use sip_engine::{AccountConfig, CallOptions, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
 
 use crate::calls::{CallBook, SoundPaths};
@@ -67,6 +69,7 @@ pub struct Sip {
     pub engine_state: EngineState,
     pub reg: RegState,
     pub calls: CallBook,
+    feed: Arc<DebugFeed>,
 }
 
 /// What a poll produced that the window should react to.
@@ -92,7 +95,10 @@ impl Sip {
                 (None, EngineState::Failed(e.to_string()))
             }
         };
+        let feed = engine.as_ref().map_or_else(|| Arc::new(DebugFeed::default()), Engine::debug_feed);
+        let _ = APP_LOG_FEED.set(feed.clone());
         let mut sip = Self {
+            feed,
             engine,
             events,
             applied: Applied { config: Some(config), ..Applied::default() },
@@ -136,6 +142,11 @@ impl Sip {
         if let Some(engine) = &self.engine {
             engine.send(command);
         }
+    }
+
+    /// The debug window's data.
+    pub fn debug_feed(&self) -> Arc<DebugFeed> {
+        self.feed.clone()
     }
 
     /// Sends commands produced by the call policy or the UI.
@@ -195,6 +206,28 @@ impl Sip {
     pub fn shutdown(&mut self) {
         self.engine = None;
     }
+}
+
+/// Where RusTone's own log lines go for the debug window.
+static APP_LOG_FEED: OnceLock<Arc<DebugFeed>> = OnceLock::new();
+
+/// fastframe-log's redactor hook, used as a tap: copies RusTone's log lines
+/// into the debug feed and leaves them unchanged. pjsua's lines reach the
+/// feed directly, so they're skipped here.
+pub fn app_log_tap(record: &log::Record<'_>, message: &str) -> Option<Cow<'static, str>> {
+    if let Some(feed) = APP_LOG_FEED.get()
+        && !record.target().starts_with("sip_engine::pjsua")
+    {
+        let level = match record.level() {
+            log::Level::Error => 1,
+            log::Level::Warn => 2,
+            log::Level::Info => 3,
+            log::Level::Debug => 4,
+            log::Level::Trace => 5,
+        };
+        feed.push_log(LogSource::App, level, format!("{}: {message}", record.target()));
+    }
+    None
 }
 
 fn failure_text(code: u16, reason: &str, detail: Option<&str>) -> String {

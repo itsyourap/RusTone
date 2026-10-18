@@ -2,6 +2,7 @@
 
 mod accounts;
 mod call;
+pub mod debug;
 mod dialer;
 mod settings;
 mod widgets;

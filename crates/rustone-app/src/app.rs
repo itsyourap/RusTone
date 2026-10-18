@@ -63,6 +63,7 @@ pub struct App {
 
     // Per-window state, reset in `window_gone`.
     pub ui: UiState,
+    pub debug: crate::ui::debug::DebugState,
     applied_palette: Option<Palette>,
     transition: fastframe_theme::Transition,
     recovery_checked: bool,
@@ -120,6 +121,7 @@ impl App {
             wants_show: false,
             show_requested: false,
             ui: UiState::default(),
+            debug: crate::ui::debug::DebugState::default(),
             applied_palette: None,
             transition: fastframe_theme::Transition::default(),
             recovery_checked: false,
@@ -256,6 +258,10 @@ impl App {
             match event {
                 Event::Show | Event::Toggle | Event::Menu(tray::SHOW) => show = true,
                 Event::Menu(tray::QUIT) => self.quit(ctx),
+                Event::Menu(tray::DEBUG) => {
+                    show = true;
+                    crate::ui::debug::set_open(self, true);
+                }
                 Event::Menu(_) => {}
             }
         }
@@ -312,6 +318,14 @@ impl App {
         if self.settings_dirty {
             ctx.request_repaint_after(SAVE_DEBOUNCE);
         }
+        // Ctrl+Shift+D toggles the debug window.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::D)) {
+            let open = !self.debug.open;
+            crate::ui::debug::set_open(self, open);
+        }
+        // Drawn from `logic` so it keeps updating while the main window is minimised.
+        crate::ui::debug::show(ctx, self);
+
         // Call timers and ended-call cleanup.
         if self.sip.calls.has_calls() {
             ctx.request_repaint_after(Duration::from_millis(500));
@@ -367,6 +381,8 @@ impl Resident for App {
     }
 
     fn window_gone(&mut self) {
+        // The debug window is a child of the main window.
+        crate::ui::debug::set_open(self, false);
         self.next = Closed::Quit;
         self.wants_show = false;
         self.applied_palette = None;

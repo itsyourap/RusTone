@@ -7,6 +7,7 @@ use crate::sip::Status;
 
 pub const SHOW: &str = "show";
 pub const QUIT: &str = "quit";
+pub const DEBUG: &str = "debug";
 const STATUS: &str = "status";
 
 /// Creates the tray item. `None` if the platform has no tray.
@@ -23,6 +24,7 @@ pub fn spawn(wake: impl Fn() + Send + Sync + 'static) -> Option<Tray> {
                 MenuItem::action(STATUS, "Starting…").enabled(false),
                 MenuItem::Separator,
                 MenuItem::action(SHOW, "Show RusTone"),
+                MenuItem::action(DEBUG, "Debug window"),
                 MenuItem::Separator,
                 MenuItem::action(QUIT, "Quit RusTone"),
             ],

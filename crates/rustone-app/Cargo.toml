@@ -31,6 +31,9 @@ fastframe-file.workspace = true
 fastframe-power.workspace = true
 if-addrs = "0.15"
 resvg = "0.45"
+egui_plot = "0.37"
+realfft = "3.5"
+jiff = "0.2"
 
 [lints.rust]
 unsafe_code = "forbid"
