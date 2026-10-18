@@ -18,6 +18,7 @@ pub const FILE_NAME: &str = "settings.toml";
 pub struct Settings {
     pub ui: UiSettings,
     pub sip: SipSettings,
+    pub calls: CallSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -70,6 +71,41 @@ impl Default for SipSettings {
             opus_stereo: false,
             enable_log: false,
         }
+    }
+}
+
+/// How DTMF digits are sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DtmfMethod {
+    /// RFC 2833, falling back to in-band.
+    #[default]
+    Auto,
+    InBand,
+    Rfc2833,
+    SipInfo,
+}
+
+/// Call behaviour.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CallSettings {
+    pub dtmf_method: DtmfMethod,
+    /// Play DTMF tones and in-call sounds locally.
+    pub local_dtmf: bool,
+    /// Accept a second call while in a call.
+    pub call_waiting: bool,
+    /// Most simultaneous calls; 0 for no limit.
+    pub max_concurrent_calls: u32,
+    /// Bring the window forward for incoming calls.
+    pub bring_to_front: bool,
+    /// Closing the ringing screen declines instead of ignoring.
+    pub no_ignore: bool,
+}
+
+impl Default for CallSettings {
+    fn default() -> Self {
+        Self { dtmf_method: DtmfMethod::Auto, local_dtmf: true, call_waiting: true, max_concurrent_calls: 0, bring_to_front: true, no_ignore: false }
     }
 }
 
@@ -264,6 +300,15 @@ mod tests {
     fn server_lists_split_on_separators() {
         assert_eq!(split_list("stun.a.com:3478; stun.b.com,stun.c.com  "), ["stun.a.com:3478", "stun.b.com", "stun.c.com"]);
         assert!(split_list(" ").is_empty());
+    }
+
+    #[test]
+    fn call_settings_have_defaults() {
+        let c = Settings::from_toml("[calls]
+dtmf_method = \"sip-info\"").unwrap().calls;
+        assert_eq!(c.dtmf_method, DtmfMethod::SipInfo);
+        assert!(c.local_dtmf && c.call_waiting && c.bring_to_front && !c.no_ignore);
+        assert_eq!(c.max_concurrent_calls, 0);
     }
 
     #[test]
