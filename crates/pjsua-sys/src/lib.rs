@@ -20,7 +20,7 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::{pjsip_cfg_t, pjsua_reg_info};
+    use super::{pjsip_cfg_t, pjsip_rx_data, pjsua_reg_info};
     use std::ffi::{c_char, c_int};
 
     unsafe extern "C" {
@@ -32,6 +32,15 @@ pub mod shim {
         /// Returns the value's full length, or -1 if absent.
         pub fn jf_reg_info_header(
             info: *const pjsua_reg_info,
+            name: *const c_char,
+            buf: *mut c_char,
+            buf_len: usize,
+        ) -> c_int;
+
+        /// Prints header `name` of a received message as "Name: value"
+        /// into `buf` (NUL-terminated). Returns the length, or -1 if absent.
+        pub fn jf_rdata_header(
+            rdata: *const pjsip_rx_data,
             name: *const c_char,
             buf: *mut c_char,
             buf_len: usize,

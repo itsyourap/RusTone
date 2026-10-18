@@ -144,7 +144,19 @@ pub const PJ_LOG_INDENT_SIZE: u32 = 1;
 pub const PJ_LOG_INDENT_CHAR: u8 = 46u8;
 pub const PJ_LOG_SENDER_WIDTH: u32 = 22;
 pub const PJ_LOG_THREAD_WIDTH: u32 = 12;
+pub const PJSIP_EBUSY: u32 = 171001;
 pub const PJ_INVALID_SOCKET: i32 = -1;
+pub const PJMEDIA_TONEGEN_MAX_DIGITS: u32 = 32;
+pub const PJMEDIA_TONEGEN_SINE: u32 = 1;
+pub const PJMEDIA_TONEGEN_FLOATING_POINT: u32 = 2;
+pub const PJMEDIA_TONEGEN_FIXED_POINT_CORDIC: u32 = 3;
+pub const PJMEDIA_TONEGEN_FAST_FIXED_POINT: u32 = 4;
+pub const PJMEDIA_TONEGEN_ALG: u32 = 2;
+pub const PJMEDIA_TONEGEN_FIXED_POINT_CORDIC_LOOP: u32 = 10;
+pub const PJMEDIA_TONEGEN_FADE_IN_TIME: u32 = 1;
+pub const PJMEDIA_TONEGEN_FADE_OUT_TIME: u32 = 2;
+pub const PJMEDIA_TONEGEN_VOLUME: u32 = 12288;
+pub const PJMEDIA_RTP_EREMNORFC2833: u32 = 220107;
 pub const PJSUA_POOL_LEN: u32 = 1000;
 pub const PJSUA_POOL_INC: u32 = 1000;
 pub const PJSUA_POOL_LEN_ACC: u32 = 512;
@@ -3359,6 +3371,9 @@ impl Default for pj_pool_t {
             s.assume_init()
         }
     }
+}
+unsafe extern "C" {
+    pub fn pj_pool_release(pool: *mut pj_pool_t);
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -6697,6 +6712,9 @@ impl Default for pjmedia_port {
         }
     }
 }
+unsafe extern "C" {
+    pub fn pjmedia_port_destroy(port: *mut pjmedia_port) -> pj_status_t;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct pjmedia_codec_info {
@@ -8040,6 +8058,156 @@ impl Default for pjmedia_stream_info {
             s.assume_init()
         }
     }
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct pjmedia_tone_desc {
+    pub freq1: ::std::os::raw::c_short,
+    pub freq2: ::std::os::raw::c_short,
+    pub on_msec: ::std::os::raw::c_short,
+    pub off_msec: ::std::os::raw::c_short,
+    pub volume: ::std::os::raw::c_short,
+    pub flags: ::std::os::raw::c_short,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of pjmedia_tone_desc"][::std::mem::size_of::<pjmedia_tone_desc>() - 12usize];
+    ["Alignment of pjmedia_tone_desc"][::std::mem::align_of::<pjmedia_tone_desc>() - 2usize];
+    ["Offset of field: pjmedia_tone_desc::freq1"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, freq1) - 0usize];
+    ["Offset of field: pjmedia_tone_desc::freq2"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, freq2) - 2usize];
+    ["Offset of field: pjmedia_tone_desc::on_msec"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, on_msec) - 4usize];
+    ["Offset of field: pjmedia_tone_desc::off_msec"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, off_msec) - 6usize];
+    ["Offset of field: pjmedia_tone_desc::volume"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, volume) - 8usize];
+    ["Offset of field: pjmedia_tone_desc::flags"]
+        [::std::mem::offset_of!(pjmedia_tone_desc, flags) - 10usize];
+};
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct pjmedia_tone_digit {
+    pub digit: ::std::os::raw::c_char,
+    pub on_msec: ::std::os::raw::c_short,
+    pub off_msec: ::std::os::raw::c_short,
+    pub volume: ::std::os::raw::c_short,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of pjmedia_tone_digit"][::std::mem::size_of::<pjmedia_tone_digit>() - 8usize];
+    ["Alignment of pjmedia_tone_digit"][::std::mem::align_of::<pjmedia_tone_digit>() - 2usize];
+    ["Offset of field: pjmedia_tone_digit::digit"]
+        [::std::mem::offset_of!(pjmedia_tone_digit, digit) - 0usize];
+    ["Offset of field: pjmedia_tone_digit::on_msec"]
+        [::std::mem::offset_of!(pjmedia_tone_digit, on_msec) - 2usize];
+    ["Offset of field: pjmedia_tone_digit::off_msec"]
+        [::std::mem::offset_of!(pjmedia_tone_digit, off_msec) - 4usize];
+    ["Offset of field: pjmedia_tone_digit::volume"]
+        [::std::mem::offset_of!(pjmedia_tone_digit, volume) - 6usize];
+};
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct pjmedia_tone_digit_map {
+    pub count: ::std::os::raw::c_uint,
+    pub digits: [pjmedia_tone_digit_map__bindgen_ty_1; 16usize],
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct pjmedia_tone_digit_map__bindgen_ty_1 {
+    pub digit: ::std::os::raw::c_char,
+    pub freq1: ::std::os::raw::c_short,
+    pub freq2: ::std::os::raw::c_short,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of pjmedia_tone_digit_map__bindgen_ty_1"]
+        [::std::mem::size_of::<pjmedia_tone_digit_map__bindgen_ty_1>() - 6usize];
+    ["Alignment of pjmedia_tone_digit_map__bindgen_ty_1"]
+        [::std::mem::align_of::<pjmedia_tone_digit_map__bindgen_ty_1>() - 2usize];
+    ["Offset of field: pjmedia_tone_digit_map__bindgen_ty_1::digit"]
+        [::std::mem::offset_of!(pjmedia_tone_digit_map__bindgen_ty_1, digit) - 0usize];
+    ["Offset of field: pjmedia_tone_digit_map__bindgen_ty_1::freq1"]
+        [::std::mem::offset_of!(pjmedia_tone_digit_map__bindgen_ty_1, freq1) - 2usize];
+    ["Offset of field: pjmedia_tone_digit_map__bindgen_ty_1::freq2"]
+        [::std::mem::offset_of!(pjmedia_tone_digit_map__bindgen_ty_1, freq2) - 4usize];
+};
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of pjmedia_tone_digit_map"][::std::mem::size_of::<pjmedia_tone_digit_map>() - 100usize];
+    ["Alignment of pjmedia_tone_digit_map"]
+        [::std::mem::align_of::<pjmedia_tone_digit_map>() - 4usize];
+    ["Offset of field: pjmedia_tone_digit_map::count"]
+        [::std::mem::offset_of!(pjmedia_tone_digit_map, count) - 0usize];
+    ["Offset of field: pjmedia_tone_digit_map::digits"]
+        [::std::mem::offset_of!(pjmedia_tone_digit_map, digits) - 4usize];
+};
+pub const PJMEDIA_TONEGEN_LOOP: _bindgen_ty_8 = 1;
+pub const PJMEDIA_TONEGEN_NO_LOCK: _bindgen_ty_8 = 2;
+pub type _bindgen_ty_8 = ::std::os::raw::c_int;
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_create(
+        pool: *mut pj_pool_t,
+        clock_rate: ::std::os::raw::c_uint,
+        channel_count: ::std::os::raw::c_uint,
+        samples_per_frame: ::std::os::raw::c_uint,
+        bits_per_sample: ::std::os::raw::c_uint,
+        options: ::std::os::raw::c_uint,
+        p_port: *mut *mut pjmedia_port,
+    ) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_create2(
+        pool: *mut pj_pool_t,
+        name: *const pj_str_t,
+        clock_rate: ::std::os::raw::c_uint,
+        channel_count: ::std::os::raw::c_uint,
+        samples_per_frame: ::std::os::raw::c_uint,
+        bits_per_sample: ::std::os::raw::c_uint,
+        options: ::std::os::raw::c_uint,
+        p_port: *mut *mut pjmedia_port,
+    ) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_is_busy(tonegen: *mut pjmedia_port) -> pj_bool_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_stop(tonegen: *mut pjmedia_port) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_stop_loop(tonegen: *mut pjmedia_port) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_rewind(tonegen: *mut pjmedia_port) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_play(
+        tonegen: *mut pjmedia_port,
+        count: ::std::os::raw::c_uint,
+        tones: *const pjmedia_tone_desc,
+        options: ::std::os::raw::c_uint,
+    ) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_play_digits(
+        tonegen: *mut pjmedia_port,
+        count: ::std::os::raw::c_uint,
+        digits: *const pjmedia_tone_digit,
+        options: ::std::os::raw::c_uint,
+    ) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_get_digit_map(
+        tonegen: *mut pjmedia_port,
+        m: *mut *const pjmedia_tone_digit_map,
+    ) -> pj_status_t;
+}
+unsafe extern "C" {
+    pub fn pjmedia_tonegen_set_digit_map(
+        tonegen: *mut pjmedia_port,
+        m: *mut pjmedia_tone_digit_map,
+    ) -> pj_status_t;
 }
 #[repr(C, packed)]
 #[derive(Debug, Default, Copy, Clone)]

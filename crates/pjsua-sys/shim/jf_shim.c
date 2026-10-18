@@ -35,6 +35,33 @@ int jf_reg_info_header(const pjsua_reg_info *info, const char *name,
     return (int)hdr->hvalue.slen;
 }
 
+/*
+ * Prints header `name` of a received message (any header type) into `buf`
+ * as "Name: value", NUL-terminated and truncated to fit. Returns the
+ * printed length, or -1 when the message has no such header. Used for
+ * caller ID (P-Asserted-Identity, Remote-Party-ID), Diversion, User-Agent.
+ */
+int jf_rdata_header(const pjsip_rx_data *rdata, const char *name,
+                    char *buf, size_t buf_len)
+{
+    pj_str_t hname;
+    const pjsip_hdr *hdr;
+    int len;
+
+    if (!rdata || !rdata->msg_info.msg || !name || !buf || buf_len < 2)
+        return -1;
+    hname = pj_str((char *)name);
+    hdr = (const pjsip_hdr *)pjsip_msg_find_hdr_by_name(rdata->msg_info.msg,
+                                                        &hname, NULL);
+    if (!hdr)
+        return -1;
+    len = pjsip_hdr_print_on((void *)hdr, buf, buf_len - 1);
+    if (len < 0)
+        len = 0;
+    buf[len] = '\0';
+    return len;
+}
+
 /* Struct sizes as MSVC sees them, used by tests to check the bindgen
  * layouts against the compiler that built the library.
  */
