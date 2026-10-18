@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod calls;
 mod icons;
 mod netwatch;
 mod sip;
@@ -93,7 +94,7 @@ fn main() -> ExitCode {
 
     fastframe_titlebar::init();
     let start_hidden = args.minimized || settings.ui.start_minimized;
-    let paths = Paths { settings: settings_path, sip_log: dirs.state.join("sip.log") };
+    let paths = Paths { settings: settings_path, sounds: dirs.cache.join("sounds"), sip_log: dirs.state.join("sip.log") };
     let app = App::new(settings, paths, requests, &waker);
 
     let shell = Shell::new(app, &waker).start_hidden(start_hidden);

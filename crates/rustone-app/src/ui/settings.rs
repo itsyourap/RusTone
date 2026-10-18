@@ -2,7 +2,7 @@
 //! Settings arrive in Phase 8.
 
 use egui::Ui;
-use rustone_core::settings::ThemePreference;
+use rustone_core::settings::{DtmfMethod, ThemePreference};
 
 use super::widgets::{self, card, section_title, setting_row, setting_stack};
 use crate::app::App;
@@ -16,6 +16,36 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.add_space(8.0);
 
         super::accounts::list(ui, app, p);
+        ui.add_space(12.0);
+
+        section_title(ui, p, "Calls");
+        card(ui, p, |ui| {
+            let calls = &mut app.settings.calls;
+            let mut changed = false;
+            setting_stack(ui, p, "DTMF", Some("How keypad digits are sent during a call"), |ui| {
+                egui::ComboBox::from_id_salt("dtmf-method")
+                    .width(ui.available_width())
+                    .selected_text(dtmf_label(calls.dtmf_method))
+                    .show_ui(ui, |ui| {
+                        for method in [DtmfMethod::Auto, DtmfMethod::Rfc2833, DtmfMethod::InBand, DtmfMethod::SipInfo] {
+                            changed |= ui.selectable_value(&mut calls.dtmf_method, method, dtmf_label(method)).changed();
+                        }
+                    });
+            });
+            ui.separator();
+            for (value, title, description) in [
+                (&mut calls.local_dtmf, "Call sounds", Some("Keypad tones, call-waiting beep and hang-up sound")),
+                (&mut calls.call_waiting, "Call waiting", Some("Accept a second call during a call")),
+                (&mut calls.bring_to_front, "Show window for incoming calls", None),
+            ] {
+                setting_row(ui, p, title, description, |ui| {
+                    changed |= widgets::toggle(ui, p, value, title).changed();
+                });
+            }
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
         ui.add_space(12.0);
 
         section_title(ui, p, "Appearance");
@@ -69,4 +99,13 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(8.0);
     });
+}
+
+fn dtmf_label(method: DtmfMethod) -> &'static str {
+    match method {
+        DtmfMethod::Auto => "Automatic (RFC 2833, else in-band)",
+        DtmfMethod::Rfc2833 => "RFC 2833",
+        DtmfMethod::InBand => "In-band tones",
+        DtmfMethod::SipInfo => "SIP INFO",
+    }
 }

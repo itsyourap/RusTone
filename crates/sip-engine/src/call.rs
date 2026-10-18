@@ -89,3 +89,29 @@ pub struct Sound {
     /// 0..=1 (in-call sounds play at 0.4).
     pub level: f32,
 }
+
+/// `"Name" <sip:user@host:port;params>` → `user@host:port` (lowercase).
+pub fn uri_user_host(uri: &str) -> String {
+    let inner = match (uri.find('<'), uri.rfind('>')) {
+        (Some(open), Some(close)) if open < close => &uri[open + 1..close],
+        _ => uri,
+    };
+    let inner = inner.trim();
+    let lower = inner.to_ascii_lowercase();
+    let start = ["sips:", "sip:", "tel:"].iter().find(|s| lower.starts_with(*s)).map_or(0, |s| s.len());
+    let rest = &inner[start..];
+    let end = rest.find([';', '?', '>']).unwrap_or(rest.len());
+    rest[..end].to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uris_reduce_to_user_and_host() {
+        assert_eq!(uri_user_host("\"Bob\" <sip:05550100002@192.168.29.1:5068;transport=tls>"), "05550100002@192.168.29.1:5068");
+        assert_eq!(uri_user_host("sips:Alice@Example.com?subject=x"), "alice@example.com");
+        assert_eq!(uri_user_host("<tel:+911234>"), "+911234");
+    }
+}

@@ -34,6 +34,15 @@ fastframe_icons::icons! {
         Trash => lucide "trash-2",
         Check => lucide "check",
         Smartphone => lucide "smartphone",
+        Mic => lucide "mic",
+        MicOff => "mic-off",
+        Speaker => lucide "volume-2",
+        SpeakerOff => lucide "volume-x",
+        Pause => lucide "pause",
+        Play => lucide "play",
+        Transfer => "phone-forwarded",
+        AddCall => "user-plus",
+        Close => lucide "x",
     }
 }
 

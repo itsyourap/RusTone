@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
 use rustone_core::settings::{Settings, SipSettings, split_list};
-use sip_engine::{AccountConfig, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+use sip_engine::{AccountConfig, CallOptions, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+
+use crate::calls::{CallBook, SoundPaths};
 
 /// What the engine was last told, so only changes are sent.
 #[derive(Default)]
@@ -15,6 +17,7 @@ struct Applied {
     config: Option<EngineConfig>,
     account: Option<Option<AccountConfig>>,
     local: Option<Option<LocalAccountConfig>>,
+    options: Option<CallOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,10 +66,18 @@ pub struct Sip {
     log_file: PathBuf,
     pub engine_state: EngineState,
     pub reg: RegState,
+    pub calls: CallBook,
+}
+
+/// What a poll produced that the window should react to.
+#[derive(Debug, Default)]
+pub struct Polled {
+    /// An incoming call wants the window shown.
+    pub show_window: bool,
 }
 
 impl Sip {
-    pub fn spawn(settings: &Settings, log_file: PathBuf, waker: &Waker) -> Self {
+    pub fn spawn(settings: &Settings, log_file: PathBuf, sounds: SoundPaths, waker: &Waker) -> Self {
         let events: Arc<Mutex<Vec<Event>>> = Arc::default();
         let sink_events = events.clone();
         let sink_waker = waker.clone();
@@ -88,6 +99,7 @@ impl Sip {
             log_file,
             engine_state,
             reg: RegState::Unregistered,
+            calls: CallBook::new(sounds),
         };
         sip.sync(settings);
         sip
@@ -97,7 +109,8 @@ impl Sip {
     pub fn sync(&mut self, settings: &Settings) {
         let Some(engine) = &self.engine else { return };
         let config = engine_config(&settings.sip, &settings.local_account, &self.log_file);
-        if self.applied.config.as_ref() != Some(&config) {
+        // A restart drops calls: wait until none are live.
+        if self.applied.config.as_ref() != Some(&config) && self.calls.live_count() == 0 {
             log::info!("SIP settings changed; restarting the engine");
             engine.send(Command::Restart(config.clone()));
             self.applied.config = Some(config.clone());
@@ -106,6 +119,11 @@ impl Sip {
         if self.applied.account.as_ref() != Some(&account) {
             engine.send(Command::SetAccount(account.clone()));
             self.applied.account = Some(account);
+        }
+        let options = call_options(settings);
+        if self.applied.options != Some(options) {
+            engine.send(Command::SetCallOptions(options));
+            self.applied.options = Some(options);
         }
         let local = local_config(&settings.local_account);
         if self.applied.local.as_ref() != Some(&local) {
@@ -120,11 +138,21 @@ impl Sip {
         }
     }
 
-    /// Applies queued engine events. Returns true if anything changed.
-    pub fn poll(&mut self) -> bool {
+    /// Sends commands produced by the call policy or the UI.
+    pub fn run(&self, commands: Vec<Command>) {
+        for command in commands {
+            self.send(command);
+        }
+    }
+
+    /// Applies queued engine events.
+    pub fn poll(&mut self, settings: &Settings) -> Polled {
+        let mut polled = Polled::default();
         let events = std::mem::take(&mut *self.events.lock().unwrap_or_else(|e| e.into_inner()));
-        let changed = !events.is_empty();
         for event in events {
+            let outcome = self.calls.on_event(&event, &settings.calls);
+            polled.show_window |= outcome.show_window;
+            self.run(outcome.commands);
             match event {
                 Event::Started => self.engine_state = EngineState::Running,
                 Event::Stopped => self.engine_state = EngineState::Stopped,
@@ -137,11 +165,11 @@ impl Sip {
                     }
                     self.reg = state;
                 }
-                // Calls are handled from the next step on.
                 _ => {}
             }
         }
-        changed
+        self.calls.tick();
+        polled
     }
 
     pub fn status(&self, settings: &Settings) -> Status {
@@ -229,6 +257,19 @@ pub fn account_config(a: &Account, _sip: &SipSettings) -> AccountConfig {
         allow_rewrite: a.allow_rewrite,
         disable_session_timer: a.disable_session_timer,
         mwi: !a.voicemail_number.trim().is_empty(),
+    }
+}
+
+fn call_options(settings: &Settings) -> CallOptions {
+    use rustone_core::settings::DtmfMethod as M;
+    CallOptions {
+        dtmf_method: match settings.calls.dtmf_method {
+            M::Auto => sip_engine::DtmfMethod::Auto,
+            M::InBand => sip_engine::DtmfMethod::InBand,
+            M::Rfc2833 => sip_engine::DtmfMethod::Rfc2833,
+            M::SipInfo => sip_engine::DtmfMethod::SipInfo,
+        },
+        local_dtmf: settings.calls.local_dtmf,
     }
 }
 

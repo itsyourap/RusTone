@@ -22,6 +22,8 @@ use crate::ui::UiState;
 /// Where the app keeps its files.
 pub struct Paths {
     pub settings: PathBuf,
+    /// Where the generated sound files go.
+    pub sounds: PathBuf,
     /// The opt-in full SIP log.
     pub sip_log: PathBuf,
 }
@@ -56,6 +58,8 @@ pub struct App {
     next: Closed,
     quit_requested: bool,
     wants_show: bool,
+    /// Bring the window forward at the next chance (incoming call).
+    show_requested: bool,
 
     // Per-window state, reset in `window_gone`.
     pub ui: UiState,
@@ -79,7 +83,22 @@ impl App {
                 Err(e) => log::warn!("cannot read the password for account {}: {e}", account.id),
             }
         }
-        let sip = Sip::spawn(&settings, paths.sip_log, waker);
+        let sounds = match rustone_core::sounds::install(&paths.sounds) {
+            Ok(files) => {
+                use rustone_core::sounds::Sound;
+                crate::calls::SoundPaths {
+                    ringtone: files.path(Sound::Ringtone),
+                    ringback: files.path(Sound::Ringback),
+                    call_waiting: files.path(Sound::CallWaiting),
+                    hangup: files.path(Sound::Hangup),
+                }
+            }
+            Err(e) => {
+                log::warn!("cannot write sound files: {e}");
+                crate::calls::SoundPaths::default()
+            }
+        };
+        let sip = Sip::spawn(&settings, paths.sip_log, sounds, waker);
         let (power_wake, net_wake) = (waker.clone(), waker.clone());
         let wake = waker.clone();
         Self {
@@ -99,6 +118,7 @@ impl App {
             next: Closed::Quit,
             quit_requested: false,
             wants_show: false,
+            show_requested: false,
             ui: UiState::default(),
             applied_palette: None,
             transition: fastframe_theme::Transition::default(),
@@ -147,6 +167,12 @@ impl App {
 
     pub fn status(&self) -> Status {
         self.sip.status(&self.settings)
+    }
+
+    /// Runs a call action and sends the commands it produces.
+    pub fn act(&mut self, action: impl FnOnce(&mut crate::calls::CallBook) -> Vec<sip_engine::Command>) {
+        let commands = action(&mut self.sip.calls);
+        self.sip.run(commands);
     }
 
     /// Saves an account (new when its id is 0) and its password. Returns its id.
@@ -205,7 +231,12 @@ impl App {
             self.sip.send(sip_engine::Command::IpChanged);
         }
         self.sip.sync(&self.settings);
-        self.sip.poll();
+        let polled = self.sip.poll(&self.settings);
+        if polled.show_window {
+            self.ui.page = crate::ui::Page::Dialer;
+            self.ui.adding_call = false;
+            self.show_requested = true;
+        }
         let status = self.status();
         if self.tray_status.as_ref() != Some(&status) {
             if let Some(tray) = &mut self.tray {
@@ -219,7 +250,7 @@ impl App {
     /// window's context, or `None` while running in the tray.
     fn poll(&mut self, ctx: Option<&egui::Context>) {
         self.update_sip();
-        let mut show = false;
+        let mut show = std::mem::take(&mut self.show_requested);
         let events = self.tray.as_ref().map(Tray::events).unwrap_or_default();
         for event in events {
             match event {
@@ -280,6 +311,10 @@ impl App {
         self.save_settings(false);
         if self.settings_dirty {
             ctx.request_repaint_after(SAVE_DEBOUNCE);
+        }
+        // Call timers and ended-call cleanup.
+        if self.sip.calls.has_calls() {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
 
@@ -347,6 +382,9 @@ impl Resident for App {
             Headless::Quit
         } else if std::mem::take(&mut self.wants_show) {
             Headless::Show
+        } else if self.sip.calls.has_calls() {
+            // Keep ended calls expiring while hidden.
+            Headless::WaitFor(Duration::from_millis(500))
         } else {
             Headless::Wait
         }

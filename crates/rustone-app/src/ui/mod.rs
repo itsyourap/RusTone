@@ -1,6 +1,7 @@
 //! The window's layout: header, page, bottom navigation.
 
 mod accounts;
+mod call;
 mod dialer;
 mod settings;
 mod widgets;
@@ -36,6 +37,9 @@ pub struct UiState {
     pub page: Page,
     pub dialer: dialer::DialerState,
     pub account_draft: Option<accounts::Draft>,
+    /// Showing the dialer during a call ("Add call").
+    pub adding_call: bool,
+    pub call_panel: call::CallPanel,
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App) {
@@ -53,21 +57,50 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
 
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(p.window).inner_margin(egui::Margin::symmetric(16, 8)))
-        .show(ui, |ui| match app.ui.page {
-            Page::Dialer => {
-                let online = app.status().is_online();
-                dialer::show(ui, &p, &mut app.ui.dialer, online);
+        .show(ui, |ui| {
+            let page = app.ui.page;
+            let in_call_view = page == Page::Dialer && !app.ui.adding_call;
+            // Elsewhere during a call, a bar leads back to it.
+            if app.sip.calls.has_calls() && !in_call_view && call::return_bar(ui, app, &p) {
+                app.ui.page = Page::Dialer;
+                app.ui.adding_call = false;
+                return;
             }
-            Page::Calls => widgets::empty_state(ui, &p, Icon::History, "No calls yet", "Calls you make and receive appear here."),
-            Page::Contacts => widgets::empty_state(ui, &p, Icon::Users, "No contacts", "Contacts and their presence appear here."),
-            Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
-            Page::Settings => settings::show(ui, app, &p),
-            Page::Account => accounts::editor(ui, app, &p),
+            match page {
+                Page::Dialer if app.sip.calls.has_calls() && !app.ui.adding_call => call::show(ui, app, &p),
+                Page::Dialer => {
+                    let can_call = app.status().is_online() || app.settings.local_account.enabled;
+                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call) {
+                        Some(dialer::Action::Call(target)) => dial(app, &target),
+                        Some(dialer::Action::Key(digit)) => app.sip.send(sip_engine::Command::PlayLocalDigits(digit)),
+                        None => {}
+                    }
+                }
+                Page::Calls => widgets::empty_state(ui, &p, Icon::History, "No calls yet", "Calls you make and receive appear here."),
+                Page::Contacts => widgets::empty_state(ui, &p, Icon::Users, "No contacts", "Contacts and their presence appear here."),
+                Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
+                Page::Settings => settings::show(ui, app, &p),
+                Page::Account => accounts::editor(ui, app, &p),
+            }
         });
 
     if fastframe_titlebar::enabled() {
         fastframe_titlebar::resize(ui);
     }
+}
+
+/// Places a call from the dialer. Uses the local account for IP addresses
+/// when it's on, or when there's no usable main account.
+fn dial(app: &mut App, target: &str) {
+    let target = target.trim();
+    if target.is_empty() {
+        return;
+    }
+    let looks_like_ip = target.split([':', '@']).any(|part| part.parse::<std::net::IpAddr>().is_ok());
+    let local = app.settings.local_account.enabled && (looks_like_ip || !app.status().is_online());
+    app.act(|c| c.dial(target, local));
+    app.ui.adding_call = false;
+    app.ui.call_panel = call::CallPanel::None;
 }
 
 fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
