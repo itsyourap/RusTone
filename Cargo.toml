@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pjsua-sys", "crates/rustone-core", "crates/rustone-cli"]
+members = ["crates/pjsua-sys", "crates/rustone-core", "crates/rustone-app", "crates/rustone-cli"]
 
 [workspace.package]
 version = "0.1.0"
