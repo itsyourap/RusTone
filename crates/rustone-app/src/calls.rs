@@ -259,7 +259,10 @@ impl CallBook {
                 return;
             }
             self.calls.push(Call::new(info.clone()));
-            if info.direction == Direction::Outgoing {
+            // A new outgoing call takes the screen, unless an incoming call
+            // is ringing there (it needs an answer).
+            let ringing_shown = self.current.and_then(|c| self.get(c)).is_some_and(Call::is_ringing_in);
+            if info.direction == Direction::Outgoing && !ringing_shown {
                 self.current = Some(id);
             }
         }
@@ -638,6 +641,15 @@ mod tests {
         let strict = CallSettings { no_ignore: true, ..cfg };
         b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &strict);
         assert_eq!(b.ignore(3, &strict).first(), Some(&Command::Answer { call: 3, code: 486, video: false }));
+    }
+
+    #[test]
+    fn a_ringing_call_keeps_the_screen() {
+        let cfg = CallSettings::default();
+        let mut b = book();
+        b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        b.on_event(&Event::Call(info(0, Direction::Outgoing, CallState::Calling, "<sip:200@pbx>")), &cfg);
+        assert_eq!(b.current, Some(1));
     }
 
     #[test]
