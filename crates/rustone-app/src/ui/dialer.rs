@@ -1,5 +1,5 @@
-//! The keypad dialer. Calling is wired up in Phase 3; until the SIP engine
-//! is registered, the call buttons are disabled.
+//! The keypad dialer. Calling is wired up in Phase 3; the call buttons are
+//! disabled until the account is registered.
 
 use egui::{Align, Layout, Ui, Vec2};
 use fastframe_fonts::Weight;
@@ -36,8 +36,7 @@ fn allowed(c: char) -> bool {
     c.is_ascii_alphanumeric() || "*#+@.:-_;=".contains(c)
 }
 
-pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState) {
-    let registered = false; // Phase 2: from the SIP engine.
+pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool) {
 
     ui.with_layout(Layout::top_down(Align::Center), |ui| {
         let keypad_height = 4.0 * KEY_SIZE + 3.0 * KEY_GAP;

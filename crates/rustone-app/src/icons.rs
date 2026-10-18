@@ -53,6 +53,19 @@ pub fn logo_rgba(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// The logo greyed out and faded, for the tray while not registered.
+pub fn logo_rgba_offline(size: usize) -> Vec<u8> {
+    let mut rgba = logo_rgba(size);
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let grey = ((u16::from(px[0]) * 3 + u16::from(px[1]) * 6 + u16::from(px[2])) / 10) as u8;
+        px[0] = grey;
+        px[1] = grey;
+        px[2] = grey;
+        px[3] = (u16::from(px[3]) * 3 / 4) as u8;
+    }
+    rgba
+}
+
 /// The window and taskbar icon.
 pub fn window_icon() -> egui::IconData {
     const SIZE: usize = 64;

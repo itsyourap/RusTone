@@ -8,6 +8,7 @@ use egui::{Align, Layout, Sense, Ui, Vec2, vec2};
 use fastframe_fonts::Weight;
 
 use crate::app::App;
+use crate::sip::Status;
 use crate::icons::Icon;
 use crate::theme::Palette;
 
@@ -49,7 +50,10 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(p.window).inner_margin(egui::Margin::symmetric(16, 8)))
         .show(ui, |ui| match app.ui.page {
-            Page::Dialer => dialer::show(ui, &p, &mut app.ui.dialer),
+            Page::Dialer => {
+                let online = app.status().is_online();
+                dialer::show(ui, &p, &mut app.ui.dialer, online);
+            }
             Page::Calls => widgets::empty_state(ui, &p, Icon::History, "No calls yet", "Calls you make and receive appear here."),
             Page::Contacts => widgets::empty_state(ui, &p, Icon::Users, "No contacts", "Contacts and their presence appear here."),
             Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
@@ -75,7 +79,8 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (logo, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
         Icon::Phone.image(p.accent, 18.0).paint_at(ui, logo);
         ui.label(egui::RichText::new("RusTone").font(Weight::SemiBold.font_id(16.0)).color(p.text));
-        status_chip(ui, p);
+        let account = app.settings.active().map(|a| a.title().to_owned());
+        status_chip(ui, p, &app.status(), account.as_deref());
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
@@ -95,21 +100,41 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
-/// Registration status as a small pill. Static until the SIP engine lands (Phase 2).
-fn status_chip(ui: &mut Ui, p: &Palette) {
-    let text = "Not connected";
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), Weight::Medium.font_id(11.5), p.secondary);
+/// Registration status as a small pill; details on hover.
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&str>) {
+    let (dot, text) = match status {
+        Status::Online | Status::Ready => (p.success, p.secondary),
+        Status::Starting | Status::Connecting => (p.warning, p.secondary),
+        Status::Error(_) => (p.danger, p.danger),
+        Status::NoAccount | Status::Offline => (p.dim, p.secondary),
+    };
+    let label = status.label();
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), Weight::Medium.font_id(11.5), text);
     // Leave room for the settings button; show only the dot when narrow.
     let show_text = ui.available_width() > galley.size().x + 90.0;
     let width = if show_text { galley.size().x + 26.0 } else { 20.0 };
     let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, egui::CornerRadius::same(11), p.surface);
-    painter.circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.5, p.dim);
+    let pulse = matches!(status, Status::Starting | Status::Connecting);
+    let alpha = if pulse {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        0.55 + 0.45 * (ui.input(|i| i.time) * 4.0).sin().abs() as f32
+    } else {
+        1.0
+    };
+    painter.circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.5, dot.gamma_multiply(alpha));
     if show_text {
-        painter.galley(egui::pos2(rect.left() + 19.0, rect.center().y - galley.size().y / 2.0), galley, p.secondary);
+        painter.galley(egui::pos2(rect.left() + 19.0, rect.center().y - galley.size().y / 2.0), galley, text);
     }
-    response.on_hover_text(text);
+    let hover = match (status, account) {
+        (Status::Error(e), Some(a)) => format!("{a}\n{e}"),
+        (Status::Error(e), None) => e.clone(),
+        (Status::NoAccount, _) => "Add an account in Settings".to_owned(),
+        (s, Some(a)) => format!("{a}: {}", s.label()),
+        (s, None) => s.label().to_owned(),
+    };
+    response.on_hover_text(hover);
 }
 
 fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {

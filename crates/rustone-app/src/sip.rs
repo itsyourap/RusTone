@@ -1,0 +1,279 @@
+//! Connects the settings to the SIP engine and keeps the engine's state for
+//! the UI.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use fastframe_shell::Waker;
+use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
+use rustone_core::settings::{Settings, SipSettings, split_list};
+use sip_engine::{AccountConfig, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+
+/// What the engine was last told, so only changes are sent.
+#[derive(Default)]
+struct Applied {
+    config: Option<EngineConfig>,
+    account: Option<Option<AccountConfig>>,
+    local: Option<Option<LocalAccountConfig>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineState {
+    Starting,
+    Running,
+    Failed(String),
+    Stopped,
+}
+
+/// The registration status shown in the header and the tray.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    NoAccount,
+    Starting,
+    Connecting,
+    Online,
+    /// An account without a registrar (calls only).
+    Ready,
+    Offline,
+    Error(String),
+}
+
+impl Status {
+    pub fn label(&self) -> &str {
+        match self {
+            Self::NoAccount => "No account",
+            Self::Starting => "Starting…",
+            Self::Connecting => "Connecting…",
+            Self::Online => "Online",
+            Self::Ready => "Ready",
+            Self::Offline => "Not registered",
+            Self::Error(_) => "Error",
+        }
+    }
+
+    pub fn is_online(&self) -> bool {
+        matches!(self, Self::Online | Self::Ready)
+    }
+}
+
+pub struct Sip {
+    engine: Option<Engine>,
+    events: Arc<Mutex<Vec<Event>>>,
+    applied: Applied,
+    log_file: PathBuf,
+    pub engine_state: EngineState,
+    pub reg: RegState,
+}
+
+impl Sip {
+    pub fn spawn(settings: &Settings, log_file: PathBuf, waker: &Waker) -> Self {
+        let events: Arc<Mutex<Vec<Event>>> = Arc::default();
+        let sink_events = events.clone();
+        let sink_waker = waker.clone();
+        let config = engine_config(&settings.sip, &settings.local_account, &log_file);
+        let (engine, engine_state) = match Engine::spawn(config.clone(), move |event| {
+            sink_events.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+            sink_waker.wake();
+        }) {
+            Ok(engine) => (Some(engine), EngineState::Starting),
+            Err(e) => {
+                log::error!("{e}");
+                (None, EngineState::Failed(e.to_string()))
+            }
+        };
+        let mut sip = Self {
+            engine,
+            events,
+            applied: Applied { config: Some(config), ..Applied::default() },
+            log_file,
+            engine_state,
+            reg: RegState::Unregistered,
+        };
+        sip.sync(settings);
+        sip
+    }
+
+    /// Sends the engine whatever changed in the settings since last time.
+    pub fn sync(&mut self, settings: &Settings) {
+        let Some(engine) = &self.engine else { return };
+        let config = engine_config(&settings.sip, &settings.local_account, &self.log_file);
+        if self.applied.config.as_ref() != Some(&config) {
+            log::info!("SIP settings changed; restarting the engine");
+            engine.send(Command::Restart(config.clone()));
+            self.applied.config = Some(config.clone());
+        }
+        let account = settings.active().filter(|a| a.is_usable()).map(|a| account_config(a, &settings.sip));
+        if self.applied.account.as_ref() != Some(&account) {
+            engine.send(Command::SetAccount(account.clone()));
+            self.applied.account = Some(account);
+        }
+        let local = local_config(&settings.local_account);
+        if self.applied.local.as_ref() != Some(&local) {
+            engine.send(Command::SetLocalAccount(local.clone()));
+            self.applied.local = Some(local);
+        }
+    }
+
+    /// Applies queued engine events. Returns true if anything changed.
+    pub fn poll(&mut self) -> bool {
+        let events = std::mem::take(&mut *self.events.lock().unwrap_or_else(|e| e.into_inner()));
+        let changed = !events.is_empty();
+        for event in events {
+            match event {
+                Event::Started => self.engine_state = EngineState::Running,
+                Event::Stopped => self.engine_state = EngineState::Stopped,
+                Event::Failed(e) => self.engine_state = EngineState::Failed(e),
+                Event::Registration(state) => {
+                    match &state {
+                        RegState::Registered { expires } => log::info!("registered (expires in {expires}s)"),
+                        RegState::Failed { code, reason, .. } => log::warn!("registration failed: {code} {reason}"),
+                        _ => {}
+                    }
+                    self.reg = state;
+                }
+            }
+        }
+        changed
+    }
+
+    pub fn status(&self, settings: &Settings) -> Status {
+        match &self.engine_state {
+            EngineState::Failed(e) => return Status::Error(e.clone()),
+            EngineState::Starting => return Status::Starting,
+            EngineState::Stopped => return Status::Offline,
+            EngineState::Running => {}
+        }
+        if settings.active().is_none_or(|a| !a.is_usable()) {
+            return Status::NoAccount;
+        }
+        match &self.reg {
+            RegState::Unregistered => Status::Offline,
+            RegState::NoRegistrar => Status::Ready,
+            RegState::Registering => Status::Connecting,
+            RegState::Registered { .. } => Status::Online,
+            RegState::Failed { code, reason, detail } => Status::Error(failure_text(*code, reason, detail.as_deref())),
+        }
+    }
+
+    /// Shuts pjsua down (unregistering). Blocks for up to a few seconds.
+    pub fn shutdown(&mut self) {
+        self.engine = None;
+    }
+}
+
+fn failure_text(code: u16, reason: &str, detail: Option<&str>) -> String {
+    let base = match (code, reason.is_empty()) {
+        (0, _) => reason.to_owned(),
+        (_, true) => format!("Error {code}"),
+        (_, false) => format!("{code} {reason}"),
+    };
+    match detail {
+        Some(detail) => format!("{base}: {detail}"),
+        None => base,
+    }
+}
+
+pub fn engine_config(sip: &SipSettings, local: &LocalAccount, log_file: &std::path::Path) -> EngineConfig {
+    EngineConfig {
+        user_agent: sip.user_agent.trim().to_owned(),
+        rport: sip.rport,
+        source_port: sip.source_port,
+        rtp_port_min: sip.rtp_port_min,
+        rtp_port_max: sip.rtp_port_max,
+        stun_servers: if sip.enable_stun { split_list(&sip.stun) } else { Vec::new() },
+        nameservers: if sip.dns_srv { split_list(&sip.dns_srv_ns) } else { Vec::new() },
+        audio_codecs: sip.audio_codecs.split_whitespace().map(str::to_owned).collect(),
+        vad: sip.vad,
+        ec: sip.ec,
+        opus_stereo: sip.opus_stereo,
+        local_account: local.enabled,
+        log_file: sip.enable_log.then(|| log_file.to_path_buf()),
+    }
+}
+
+pub fn account_config(a: &Account, _sip: &SipSettings) -> AccountConfig {
+    AccountConfig {
+        server: a.server.trim().to_owned(),
+        proxies: a.proxies(),
+        domain: a.domain.trim().to_owned(),
+        username: a.username.trim().to_owned(),
+        password: a.password.clone(),
+        auth_id: a.auth_id.trim().to_owned(),
+        display_name: a.display_name.trim().to_owned(),
+        transport: match a.transport {
+            Transport::Udp => sip_engine::Transport::Udp,
+            Transport::Tcp => sip_engine::Transport::Tcp,
+            Transport::Tls => sip_engine::Transport::Tls,
+        },
+        srtp: match a.srtp {
+            SrtpMode::Disabled => Srtp::Disabled,
+            SrtpMode::Optional => Srtp::Optional,
+            SrtpMode::Mandatory => Srtp::Mandatory,
+            SrtpMode::Dtls => Srtp::Dtls,
+            SrtpMode::DtlsSdes => Srtp::DtlsSdes,
+        },
+        public_addr: a.public_addr.trim().to_owned(),
+        register_refresh: a.register_refresh,
+        keep_alive: a.keep_alive,
+        publish: a.publish,
+        ice: a.ice,
+        allow_rewrite: a.allow_rewrite,
+        disable_session_timer: a.disable_session_timer,
+        mwi: !a.voicemail_number.trim().is_empty(),
+    }
+}
+
+fn local_config(local: &LocalAccount) -> Option<LocalAccountConfig> {
+    local.enabled.then(|| LocalAccountConfig {
+        display_name: local.display_name.trim().to_owned(),
+        username: local.username.trim().to_owned(),
+        domain: local.domain.trim().to_owned(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_config_follows_switches() {
+        let mut sip = SipSettings { stun: "a; b".into(), dns_srv_ns: "8.8.8.8".into(), ..SipSettings::default() };
+        let log = std::path::Path::new("sip.log");
+        let c = engine_config(&sip, &LocalAccount::default(), log);
+        assert!(c.stun_servers.is_empty() && c.nameservers.is_empty() && c.log_file.is_none());
+        sip.enable_stun = true;
+        sip.dns_srv = true;
+        sip.enable_log = true;
+        let c = engine_config(&sip, &LocalAccount { enabled: true, ..LocalAccount::default() }, log);
+        assert_eq!(c.stun_servers, ["a", "b"]);
+        assert_eq!(c.nameservers, ["8.8.8.8"]);
+        assert!(c.local_account);
+        assert_eq!(c.log_file.as_deref(), Some(log));
+    }
+
+    #[test]
+    fn account_maps_and_trims() {
+        let a = Account {
+            server: " sip.example.com ".into(),
+            proxy: "192.168.29.1:5068".into(),
+            username: "+910000000000@sip.example.com".into(),
+            password: "pw".into(),
+            transport: Transport::Tls,
+            voicemail_number: "*86".into(),
+            ..Account::default()
+        };
+        let c = account_config(&a, &SipSettings::default());
+        assert_eq!(c.server, "sip.example.com");
+        assert_eq!(c.proxies, ["192.168.29.1:5068"]);
+        assert_eq!(c.transport, sip_engine::Transport::Tls);
+        assert!(c.mwi);
+        assert_eq!(c.password, "pw");
+    }
+
+    #[test]
+    fn failures_read_well() {
+        assert_eq!(failure_text(403, "Forbidden", None), "403 Forbidden");
+        assert_eq!(failure_text(403, "Forbidden", Some("Wrong password")), "403 Forbidden: Wrong password");
+        assert_eq!(failure_text(0, "Connection refused", None), "Connection refused");
+    }
+}

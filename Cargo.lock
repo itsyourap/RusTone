@@ -1934,6 +1934,7 @@ dependencies = [
  "rustone-core",
  "log",
  "resvg",
+ "sip-engine",
 ]
 
 [[package]]

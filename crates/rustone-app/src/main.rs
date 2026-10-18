@@ -5,6 +5,7 @@
 
 mod app;
 mod icons;
+mod sip;
 mod theme;
 mod tray;
 mod ui;
@@ -17,7 +18,7 @@ use fastframe_instance::{Claim, Slot};
 use fastframe_shell::{Shell, Waker};
 use rustone_core::settings::{self, Settings};
 
-use crate::app::{App, Request, Requests};
+use crate::app::{App, Paths, Request, Requests};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const INSTANCE_ID: &str = "dev.itsyourap.rustone";
@@ -77,7 +78,7 @@ fn main() -> ExitCode {
     let found = DIRS.discover(|_, _| Ok(()));
     let dirs = found.dirs.unwrap_or_else(fallback_dirs);
     if let Err(e) = fastframe_log::Logging::new("rustone", VERSION)
-        .filter("warn,rustone=info")
+        .filter("warn,rustone=info,sip_engine=info")
         .file(dirs.state.join("rustone.log"))
         .panic_log(dirs.state.join("panic.log"))
         .init()
@@ -91,7 +92,8 @@ fn main() -> ExitCode {
 
     fastframe_titlebar::init();
     let start_hidden = args.minimized || settings.ui.start_minimized;
-    let app = App::new(settings, settings_path, requests, &waker);
+    let paths = Paths { settings: settings_path, sip_log: dirs.state.join("sip.log") };
+    let app = App::new(settings, paths, requests, &waker);
 
     let shell = Shell::new(app, &waker).start_hidden(start_hidden);
     // macOS needs AppKit's loop to keep the menu-bar item alive; elsewhere

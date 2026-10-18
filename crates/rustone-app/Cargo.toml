@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 rustone-core.workspace = true
+sip-engine.workspace = true
 egui.workspace = true
 eframe.workspace = true
 egui_extras.workspace = true

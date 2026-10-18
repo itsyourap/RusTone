@@ -10,11 +10,20 @@ use std::time::{Duration, Instant};
 
 use fastframe_shell::{Closed, Headless, Resident, Waker};
 use fastframe_tray::{Event, Tray};
+use rustone_core::secrets::{Keyring, MemoryStore, SecretStore};
 use rustone_core::settings::{Settings, WindowGeometry};
 
+use crate::sip::{Sip, Status};
 use crate::theme::{self, Palette};
 use crate::tray;
 use crate::ui::UiState;
+
+/// Where the app keeps its files.
+pub struct Paths {
+    pub settings: PathBuf,
+    /// The opt-in full SIP log.
+    pub sip_log: PathBuf,
+}
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
@@ -33,7 +42,12 @@ pub struct App {
     last_save: Instant,
     files: fastframe_file::Writer,
     pub tray: Option<Tray>,
+    /// The status the tray currently shows.
+    tray_status: Option<Status>,
     requests: Requests,
+    pub sip: Sip,
+    /// Passwords; used by the account editor.
+    _secrets: Box<dyn SecretStore>,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -49,16 +63,33 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(settings: Settings, settings_path: PathBuf, requests: Requests, waker: &Waker) -> Self {
+    pub fn new(mut settings: Settings, paths: Paths, requests: Requests, waker: &Waker) -> Self {
+        let secrets: Box<dyn SecretStore> = match Keyring::init("RusTone") {
+            Ok(store) => Box::new(store),
+            Err(e) => {
+                log::warn!("credential store unavailable ({e}); passwords won't be remembered");
+                Box::new(MemoryStore::default())
+            }
+        };
+        for account in &mut settings.accounts {
+            match secrets.get(&account.secret_key()) {
+                Ok(password) => account.password = password.unwrap_or_default(),
+                Err(e) => log::warn!("cannot read the password for account {}: {e}", account.id),
+            }
+        }
+        let sip = Sip::spawn(&settings, paths.sip_log, waker);
         let wake = waker.clone();
         Self {
             settings,
-            settings_path,
+            settings_path: paths.settings,
             settings_dirty: false,
             last_save: Instant::now(),
             files: fastframe_file::Writer::new(),
             tray: tray::spawn(move || wake.wake()),
+            tray_status: None,
             requests,
+            sip,
+            _secrets: secrets,
             rendering: fastframe_text::detect(),
             next: Closed::Quit,
             quit_requested: false,
@@ -109,9 +140,27 @@ impl App {
         self.settings.ui.close_to_tray && self.tray.as_ref().is_some_and(Tray::is_shown)
     }
 
+    pub fn status(&self) -> Status {
+        self.sip.status(&self.settings)
+    }
+
+    /// Pushes settings changes to the engine and engine events to the tray.
+    fn update_sip(&mut self) {
+        self.sip.sync(&self.settings);
+        self.sip.poll();
+        let status = self.status();
+        if self.tray_status.as_ref() != Some(&status) {
+            if let Some(tray) = &mut self.tray {
+                tray::show_status(tray, &status, self.settings.active().map(|a| a.title()));
+            }
+            self.tray_status = Some(status);
+        }
+    }
+
     /// Handles tray clicks and requests from other launches. `ctx` is the
     /// window's context, or `None` while running in the tray.
     fn poll(&mut self, ctx: Option<&egui::Context>) {
+        self.update_sip();
         let mut show = false;
         let events = self.tray.as_ref().map(Tray::events).unwrap_or_default();
         for event in events {
@@ -258,6 +307,7 @@ impl Resident for App {
 
     fn shutdown(&mut self) {
         self.save_settings(true);
+        self.sip.shutdown();
         self.files.flush(fastframe_file::FLUSH_TIMEOUT);
         log::info!("RusTone exiting");
     }

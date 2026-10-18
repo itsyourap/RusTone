@@ -48,7 +48,7 @@ pub unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
         // SAFETY: pjsua passes `len` readable bytes.
         let bytes = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len.max(0) as usize) };
         let text = String::from_utf8_lossy(bytes);
-        let text = text.trim_end();
+        let text = strip_timestamp(text.trim_end());
         match level {
             ..=1 => log::error!(target: "sip_engine::pjsua", "{text}"),
             2 => log::warn!(target: "sip_engine::pjsua", "{text}"),
@@ -56,6 +56,18 @@ pub unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
             _ => log::debug!(target: "sip_engine::pjsua", "{text}"),
         }
     });
+}
+
+/// pjsua prefixes `HH:MM:SS.mmm ` (the file log needs it; `log` adds its own).
+fn strip_timestamp(line: &str) -> &str {
+    let b = line.as_bytes();
+    let is_stamp = b.len() > 13
+        && b[2] == b':'
+        && b[5] == b':'
+        && b[8] == b'.'
+        && b[12] == b' '
+        && [0, 1, 3, 4, 6, 7, 9, 10, 11].iter().all(|&i| b[i].is_ascii_digit());
+    if is_stamp { line[13..].trim_start() } else { line }
 }
 
 pub unsafe extern "C" fn on_reg_started2(acc_id: pjsua_acc_id, info: *mut pjsua_reg_info) {
@@ -108,4 +120,16 @@ fn registrar_error(info: &pjsua_reg_info) -> Option<String> {
     // SAFETY: NUL-terminated by the shim.
     let value = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().trim().to_owned();
     (!value.is_empty()).then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pjsua_timestamps_are_stripped() {
+        assert_eq!(strip_timestamp("21:43:57.672    pjsua_acc.c  ..SIP registration failed"), "pjsua_acc.c  ..SIP registration failed");
+        assert_eq!(strip_timestamp("no stamp here"), "no stamp here");
+        assert_eq!(strip_timestamp("12:34"), "12:34");
+    }
 }
