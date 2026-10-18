@@ -1,0 +1,17 @@
+[package]
+name = "pjsua-sys"
+description = "Raw FFI bindings to the pjsua C API of pjproject"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+links = "pjproject"
+build = "build.rs"
+
+[features]
+# Regenerate src/bindings/*.rs with bindgen (needs libclang).
+regen = ["dep:bindgen"]
+
+[build-dependencies]
+bindgen = { version = "0.72", optional = true }
+cc = "1"

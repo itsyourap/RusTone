@@ -1,0 +1,6 @@
+/target
+/dist
+
+# Local test configs and logs (contain credentials / phone numbers)
+rustone-cli.toml
+*.log
