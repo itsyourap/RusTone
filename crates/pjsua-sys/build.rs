@@ -34,6 +34,37 @@ fn main() {
 
     build_shim(&pj_dir, &deps_dir);
     link(&pj_dir, &deps_dir);
+    copy_runtime_dlls(&deps_dir);
+}
+
+/// DLLs the linked pjproject imports (dumpbin /dependents): SDL2 for video
+/// windows and OpenSSL for TLS/SRTP. OpenH264 and AMR are linked statically.
+const RUNTIME_DLLS: &[&str] = &["SDL2.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll"];
+
+/// Copies the runtime DLLs next to the binaries Cargo builds
+/// (target/<profile>/ and target/<profile>/deps/ for tests), so the exe
+/// starts without PATH changes.
+fn copy_runtime_dlls(deps_dir: &Path) {
+    // OUT_DIR is target/<profile>/build/pjsua-sys-<hash>/out.
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let Some(profile_dir) = out.ancestors().nth(3) else { return };
+    for name in RUNTIME_DLLS {
+        let Some(src) = ["bin", "lib"].iter().map(|d| deps_dir.join(d).join(name)).find(|p| p.is_file()) else {
+            println!("cargo:warning={name} not found in {}\\{{bin,lib}}", deps_dir.display());
+            continue;
+        };
+        println!("cargo:rerun-if-changed={}", src.display());
+        for dir in [profile_dir.to_path_buf(), profile_dir.join("deps")] {
+            let dst = dir.join(name);
+            let same = std::fs::metadata(&dst)
+                .ok()
+                .zip(std::fs::metadata(&src).ok())
+                .is_some_and(|(d, s)| d.len() == s.len() && d.modified().ok() >= s.modified().ok());
+            if !same && let Err(e) = std::fs::create_dir_all(&dir).and_then(|()| std::fs::copy(&src, &dst).map(drop)) {
+                println!("cargo:warning=cannot copy {name} to {}: {e}", dir.display());
+            }
+        }
+    }
 }
 
 fn include_dirs(pj_dir: &Path, deps_dir: &Path) -> Vec<PathBuf> {
