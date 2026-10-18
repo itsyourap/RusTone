@@ -43,6 +43,8 @@ fastframe_icons::icons! {
         Transfer => "phone-forwarded",
         AddCall => "user-plus",
         Close => lucide "x",
+        Up => lucide "chevron-up",
+        Down => lucide "chevron-down",
         Dashboard => "layout-dashboard",
         Logs => "scroll-text",
         Network => "arrow-left-right",

@@ -84,6 +84,18 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     kv(ui, p, "SIP log file", s.enable_log.to_string());
                 });
             });
+            cols[1].add_space(10.0);
+            panel_card(&mut cols[1], p, "Codecs in the engine", |ui| {
+                if app.sip.codecs.is_empty() {
+                    ui.label(egui::RichText::new("Engine not started").color(p.dim));
+                }
+                egui::Grid::new("codecs").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+                    for c in &app.sip.codecs {
+                        let state = if c.priority == 0 { "disabled".to_owned() } else { format!("priority {}", c.priority) };
+                        kv(ui, p, &c.id, state);
+                    }
+                });
+            });
         });
     });
 }

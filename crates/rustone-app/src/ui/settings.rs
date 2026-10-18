@@ -18,6 +18,10 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         super::accounts::list(ui, app, p);
         ui.add_space(12.0);
 
+        section_title(ui, p, "Audio codecs");
+        codecs(ui, app, p);
+        ui.add_space(12.0);
+
         section_title(ui, p, "Calls");
         card(ui, p, |ui| {
             let calls = &mut app.settings.calls;
@@ -119,5 +123,58 @@ fn dtmf_label(method: DtmfMethod) -> &'static str {
         DtmfMethod::Rfc2833 => "RFC 2833",
         DtmfMethod::InBand => "In-band tones",
         DtmfMethod::SipInfo => "SIP INFO",
+    }
+}
+
+/// Enabled codecs in priority order (offered in that order), then the
+/// others the engine has. Changes restart the engine once no call is live.
+fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
+    use rustone_core::codecs;
+    let available: Vec<String> = app.sip.codecs.iter().map(|c| c.id.clone()).collect();
+    let rows = codecs::rows(&app.settings.sip.audio_codecs, &available);
+    let enabled_count = rows.iter().filter(|r| r.enabled).count();
+    let mut new_list = None;
+    card(ui, p, |ui| {
+        ui.label(egui::RichText::new("Offered in this order.").size(12.0).color(p.dim));
+        ui.add_space(4.0);
+        for (i, row) in rows.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let mut on = row.enabled;
+                let name = codecs::label(&row.id);
+                if widgets::toggle(ui, p, &mut on, &name).changed() {
+                    new_list = Some(codecs::set_enabled(&app.settings.sip.audio_codecs, &available, &row.id, on));
+                }
+                let color = if row.enabled { p.text } else { p.dim };
+                ui.label(egui::RichText::new(name).color(color)).on_hover_text(&row.id);
+                if row.enabled {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_enabled_ui(i + 1 < enabled_count, |ui| {
+                            if widgets::icon_button(ui, p, Icon::Down, p.secondary, "Lower priority").clicked() {
+                                new_list = Some(codecs::move_codec(&app.settings.sip.audio_codecs, &row.id, false));
+                            }
+                        });
+                        ui.add_enabled_ui(i > 0, |ui| {
+                            if widgets::icon_button(ui, p, Icon::Up, p.secondary, "Higher priority").clicked() {
+                                new_list = Some(codecs::move_codec(&app.settings.sip.audio_codecs, &row.id, true));
+                            }
+                        });
+                    });
+                }
+            });
+        }
+        if available.is_empty() {
+            ui.label(egui::RichText::new("The full codec list appears once the SIP engine has started.").size(12.0).color(p.dim));
+        }
+        if app.sip.calls.live_count() > 0 {
+            ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
+        }
+    });
+    if let Some(list) = new_list {
+        if list.is_empty() {
+            app.sip.calls.notice = Some(("Keep at least one codec enabled".into(), std::time::Instant::now()));
+        } else {
+            app.settings.sip.audio_codecs = list;
+            app.mark_settings_dirty();
+        }
     }
 }

@@ -68,6 +68,8 @@ pub struct Sip {
     log_file: PathBuf,
     pub engine_state: EngineState,
     pub reg: RegState,
+    /// Audio codecs the engine has (ids, preferred first), with priorities.
+    pub codecs: Vec<sip_engine::CodecInfo>,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
 }
@@ -105,6 +107,7 @@ impl Sip {
             log_file,
             engine_state,
             reg: RegState::Unregistered,
+            codecs: Vec::new(),
             calls: CallBook::new(sounds),
         };
         sip.sync(settings);
@@ -166,6 +169,7 @@ impl Sip {
             self.run(outcome.commands);
             match event {
                 Event::Started => self.engine_state = EngineState::Running,
+                Event::Codecs(codecs) => self.codecs = codecs,
                 Event::Stopped => self.engine_state = EngineState::Stopped,
                 Event::Failed(e) => self.engine_state = EngineState::Failed(e),
                 Event::Registration(state) => {
