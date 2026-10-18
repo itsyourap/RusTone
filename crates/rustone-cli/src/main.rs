@@ -66,10 +66,10 @@ fn main() -> ExitCode {
 
 /// Returns whether the Contact check passed.
 fn run(cli: Cli) -> Result<bool> {
-    let log = match cli.command {
+    match cli.command {
         Command::CheckLog { file } => {
             let bytes = std::fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-            String::from_utf8_lossy(&bytes).into_owned()
+            Ok(print_contact_check(&String::from_utf8_lossy(&bytes)))
         }
         Command::Run { config, call, duration, listen, answer, reg_timeout, sip } => {
             let cfg = Config::load(&config)?;
@@ -84,11 +84,16 @@ fn run(cli: Cli) -> Result<bool> {
                 reg_timeout: Duration::from_secs(reg_timeout),
                 echo_sip: sip,
             };
-            pj::run(&cfg, &opts, &stop)?
+            // Check the Contacts even if the session failed part-way.
+            let (result, log) = pj::run(&cfg, &opts, &stop);
+            let passed = print_contact_check(&log);
+            result.map(|()| passed)
         }
-    };
+    }
+}
 
-    let report = contact_check::check_log(&log);
+fn print_contact_check(log: &str) -> bool {
+    let report = contact_check::check_log(log);
     println!("\nContact check:\n{report}");
-    Ok(report.ok())
+    report.ok()
 }

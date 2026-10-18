@@ -15,6 +15,17 @@ use pjsua_sys::*;
 
 use crate::config::{Account, Config, Settings};
 
+/// Declares `$var`, zero-initialises it and runs pjsua's `*_default`
+/// function on it **in place**. Some of these structs (e.g.
+/// `pjsua_acc_config::reg_hdr_list`) contain self-referential `pj_list`
+/// heads, so they must never be moved after initialisation.
+macro_rules! pj_default {
+    ($var:ident : $ty:ty = $init:path) => {
+        let mut $var: $ty = std::mem::zeroed();
+        $init(&mut $var);
+    };
+}
+
 /// Everything pjsua logged during the session (for the Contact check).
 static LOG: Mutex<String> = Mutex::new(String::new());
 static ECHO_SIP: AtomicBool = AtomicBool::new(false);
@@ -33,20 +44,22 @@ pub struct Options {
     pub echo_sip: bool,
 }
 
-/// Runs one session and returns everything pjsua logged.
-pub fn run(cfg: &Config, opts: &Options, stop: &AtomicBool) -> Result<String> {
+/// Runs one session. Returns its outcome and everything pjsua logged,
+/// which is returned even when the session fails.
+pub fn run(cfg: &Config, opts: &Options, stop: &AtomicBool) -> (Result<()>, String) {
     ECHO_SIP.store(opts.echo_sip, Ordering::Relaxed);
     AUTO_ANSWER.store(opts.answer, Ordering::Relaxed);
     LOG.lock().unwrap().clear();
 
     let mut arena = Arena::default();
-    unsafe {
-        check(pjsua_create(), "pjsua_create")?;
-        let result = session(cfg, opts, stop, &mut arena);
-        pjsua_destroy();
-        result?;
-    }
-    Ok(std::mem::take(&mut *LOG.lock().unwrap()))
+    let result = unsafe {
+        check(pjsua_create(), "pjsua_create").and_then(|()| {
+            let result = session(cfg, opts, stop, &mut arena);
+            pjsua_destroy();
+            result
+        })
+    };
+    (result, std::mem::take(&mut *LOG.lock().unwrap()))
 }
 
 unsafe fn session(cfg: &Config, opts: &Options, stop: &AtomicBool, arena: &mut Arena) -> Result<()> {
@@ -73,7 +86,7 @@ unsafe fn session(cfg: &Config, opts: &Options, stop: &AtomicBool, arena: &mut A
         println!("[reg] unregistering");
         pjsua_acc_set_registration(acc_id, PJ_FALSE);
         wait_until(SHUTDOWN_TIMEOUT, &AtomicBool::new(false), || {
-            acc_info(acc_id).is_some_and(|i| i.status != 0 && !is_registered(&i))
+            acc_info(acc_id, |i| i.status != 0 && !is_registered(i)).unwrap_or(false)
         });
     }
     Ok(())
@@ -81,7 +94,7 @@ unsafe fn session(cfg: &Config, opts: &Options, stop: &AtomicBool, arena: &mut A
 
 unsafe fn init(s: &Settings, arena: &mut Arena) -> Result<()> {
     unsafe {
-        let mut ua = zeroed_with(|p| pjsua_config_default(p));
+        pj_default!(ua: pjsua_config = pjsua_config_default);
         let agent = if s.user_agent.is_empty() {
             format!("RusTone/{}", env!("CARGO_PKG_VERSION"))
         } else {
@@ -94,7 +107,7 @@ unsafe fn init(s: &Settings, arena: &mut Arena) -> Result<()> {
         ua.cb.on_call_state = Some(on_call_state);
         ua.cb.on_call_media_state = Some(on_call_media_state);
 
-        let mut log = zeroed_with(|p| pjsua_logging_config_default(p));
+        pj_default!(log: pjsua_logging_config = pjsua_logging_config_default);
         log.level = 5;
         log.console_level = 5;
         log.msg_logging = PJ_TRUE;
@@ -103,7 +116,7 @@ unsafe fn init(s: &Settings, arena: &mut Arena) -> Result<()> {
             log.log_filename = arena.pj(&s.log_file);
         }
 
-        let mut media = zeroed_with(|p| pjsua_media_config_default(p));
+        pj_default!(media: pjsua_media_config = pjsua_media_config_default);
         media.no_vad = (!s.vad) as pj_bool_t;
         media.ec_tail_len = if s.ec { 20 } else { 0 };
         media.enable_ice = PJ_FALSE;
@@ -126,7 +139,7 @@ unsafe fn create_transports(s: &Settings) -> Result<pjsua_transport_id> {
         (PJSIP_TRANSPORT_TLS, 0, "TLS"),
     ] {
         unsafe {
-            let mut tc = zeroed_with(|p| pjsua_transport_config_default(p));
+            pj_default!(tc: pjsua_transport_config = pjsua_transport_config_default);
             tc.port = port;
             let mut id = PJSUA_INVALID_ID;
             check(pjsua_transport_create(kind, &tc, &mut id), &format!("{name} transport"))?;
@@ -162,7 +175,7 @@ unsafe fn set_audio_codecs(list: &str, arena: &mut Arena) {
 
 unsafe fn add_account(a: &Account, s: &Settings, udp: pjsua_transport_id, arena: &mut Arena) -> Result<pjsua_acc_id> {
     unsafe {
-        let mut ac = zeroed_with(|p| pjsua_acc_config_default(p));
+        pj_default!(ac: pjsua_acc_config = pjsua_acc_config_default);
         ac.ka_interval = a.keep_alive;
         ac.reg_timeout = a.register_refresh;
         if a.disable_session_timer {
@@ -238,13 +251,14 @@ fn wait_registered(acc_id: pjsua_acc_id, timeout: Duration, stop: &AtomicBool) -
         if stop.load(Ordering::Relaxed) {
             bail!("interrupted");
         }
-        if let Some(info) = acc_info(acc_id) {
-            if is_registered(&info) {
+        let state = acc_info(acc_id, |i| (is_registered(i), i.status, pj_to_string(&i.status_text)));
+        if let Some((registered, status, text)) = state {
+            if registered {
                 return Ok(());
             }
             // 401/407 are retried by pjsua with credentials; other finals are fatal.
-            if info.status >= 300 && info.status != 401 && info.status != 407 {
-                bail!("registration failed: {} {}", info.status, pj_to_string(&info.status_text));
+            if status >= 300 && status != 401 && status != 407 {
+                bail!("registration failed: {status} {text}");
             }
         }
         if Instant::now() >= deadline {
@@ -258,7 +272,7 @@ unsafe fn call(a: &Account, acc_id: pjsua_acc_id, target: &str, duration: Durati
     let uri = a.sip_uri(target);
     println!("[call] dialing {uri}");
     unsafe {
-        let mut opt = zeroed_with(|p| pjsua_call_setting_default(p));
+        pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = 0;
         let dst = arena.pj(&uri);
         let mut call_id = PJSUA_INVALID_ID;
@@ -271,8 +285,8 @@ unsafe fn call(a: &Account, acc_id: pjsua_acc_id, target: &str, duration: Durati
         let mut confirmed_at: Option<Instant> = None;
         while !stop.load(Ordering::Relaxed) {
             sleep(POLL);
-            let Some(ci) = call_info(call_id) else { break };
-            match ci.state {
+            let Some(state) = call_info(call_id, |ci| ci.state) else { break };
+            match state {
                 PJSIP_INV_STATE_DISCONNECTED => break,
                 PJSIP_INV_STATE_CONFIRMED => {
                     let at = *confirmed_at.get_or_insert_with(Instant::now);
@@ -316,18 +330,18 @@ unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
 
 unsafe extern "C" fn on_reg_state2(acc_id: pjsua_acc_id, _info: *mut pjsua_reg_info) {
     guard(|| {
-        if let Some(i) = acc_info(acc_id) {
+        acc_info(acc_id, |i| {
             println!("[reg] {} {} (expires {})", i.status, pj_to_string(&i.status_text), i.expires as i32);
-        }
+        });
     });
 }
 
 unsafe extern "C" fn on_incoming_call(_acc_id: pjsua_acc_id, call_id: pjsua_call_id, _rdata: *mut pjsip_rx_data) {
     guard(|| unsafe {
-        let from = call_info(call_id).map(|ci| pj_to_string(&ci.remote_info)).unwrap_or_default();
+        let from = call_info(call_id, |ci| pj_to_string(&ci.remote_info)).unwrap_or_default();
         println!("[call] incoming from {from}");
         if AUTO_ANSWER.load(Ordering::Relaxed) {
-            let mut opt = zeroed_with(|p| pjsua_call_setting_default(p));
+            pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
             opt.vid_cnt = 0;
             pjsua_call_answer2(call_id, &opt, 200, ptr::null(), ptr::null());
         } else {
@@ -338,24 +352,23 @@ unsafe extern "C" fn on_incoming_call(_acc_id: pjsua_acc_id, call_id: pjsua_call
 
 unsafe extern "C" fn on_call_state(call_id: pjsua_call_id, _e: *mut pjsip_event) {
     guard(|| {
-        if let Some(ci) = call_info(call_id) {
+        call_info(call_id, |ci| {
             println!(
                 "[call] {} (last status {} {})",
                 pj_to_string(&ci.state_text),
                 ci.last_status,
                 pj_to_string(&ci.last_status_text)
             );
-        }
+        });
     });
 }
 
 unsafe extern "C" fn on_call_media_state(call_id: pjsua_call_id) {
     guard(|| unsafe {
-        if let Some(ci) = call_info(call_id)
-            && ci.media_status == PJSUA_CALL_MEDIA_ACTIVE
-        {
-            pjsua_conf_connect(ci.conf_slot, 0);
-            pjsua_conf_connect(0, ci.conf_slot);
+        let slot = call_info(call_id, |ci| (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE).then_some(ci.conf_slot));
+        if let Some(slot) = slot.flatten() {
+            pjsua_conf_connect(slot, 0);
+            pjsua_conf_connect(0, slot);
             println!("[call] audio connected");
         }
     });
@@ -377,21 +390,18 @@ impl Arena {
     }
 }
 
-/// Zero-initialises a pjsua struct and passes it to its `*_default` function.
-unsafe fn zeroed_with<T>(init: impl FnOnce(*mut T)) -> T {
-    let mut v = MaybeUninit::<T>::zeroed();
-    init(v.as_mut_ptr());
-    unsafe { v.assume_init() }
-}
+// pjsua_acc_info / pjsua_call_info keep their strings in an internal `buf_`,
+// so they are lent to a closure instead of being moved out (which would
+// leave the pj_str_t fields pointing at the old location).
 
-fn acc_info(acc_id: pjsua_acc_id) -> Option<pjsua_acc_info> {
+fn acc_info<R>(acc_id: pjsua_acc_id, f: impl FnOnce(&pjsua_acc_info) -> R) -> Option<R> {
     let mut info = MaybeUninit::<pjsua_acc_info>::zeroed();
-    unsafe { (pjsua_acc_get_info(acc_id, info.as_mut_ptr()) == 0).then(|| info.assume_init()) }
+    unsafe { (pjsua_acc_get_info(acc_id, info.as_mut_ptr()) == 0).then(|| f(info.assume_init_ref())) }
 }
 
-fn call_info(call_id: pjsua_call_id) -> Option<pjsua_call_info> {
+fn call_info<R>(call_id: pjsua_call_id, f: impl FnOnce(&pjsua_call_info) -> R) -> Option<R> {
     let mut info = MaybeUninit::<pjsua_call_info>::zeroed();
-    unsafe { (pjsua_call_get_info(call_id, info.as_mut_ptr()) == 0).then(|| info.assume_init()) }
+    unsafe { (pjsua_call_get_info(call_id, info.as_mut_ptr()) == 0).then(|| f(info.assume_init_ref())) }
 }
 
 fn is_registered(info: &pjsua_acc_info) -> bool {
