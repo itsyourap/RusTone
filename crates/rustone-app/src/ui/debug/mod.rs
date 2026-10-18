@@ -19,6 +19,8 @@ use crate::theme::Palette;
 
 const RAIL_WIDTH: f32 = 188.0;
 const REFRESH: Duration = Duration::from_millis(250);
+/// 60 fps for the live audio graphs.
+const LIVE_REFRESH: Duration = Duration::from_micros(16_667);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Section {
@@ -91,8 +93,18 @@ pub fn show(ctx: &egui::Context, app: &mut App) {
             return;
         }
         draw(ui, app, &p);
-        ui.ctx().request_repaint_after(REFRESH);
+        // egui shortens delayed repaints by the predicted frame time, which
+        // turns a 16 ms request into back-to-back frames; add it back.
+        let predicted = Duration::try_from_secs_f32(ui.input(|i| i.predicted_dt)).unwrap_or_default();
+        ui.ctx().request_repaint_after(refresh(app) + predicted);
     });
+}
+
+/// How soon to redraw without input. Live audio graphs need a full frame
+/// rate; everything else changes at most a few times a second.
+fn refresh(app: &App) -> Duration {
+    let live_audio = app.debug.section == Section::Audio && app.debug.audio.is_live() && app.sip.debug_feed().is_enabled();
+    if live_audio { LIVE_REFRESH } else { REFRESH }
 }
 
 fn draw(ui: &mut Ui, app: &mut App, p: &Palette) {

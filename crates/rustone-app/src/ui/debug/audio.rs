@@ -20,6 +20,13 @@ pub struct AudioState {
     held: [Option<(u32, Vec<f32>)>; 2],
 }
 
+impl AudioState {
+    /// Whether the graphs follow live audio (and need smooth repaints).
+    pub fn is_live(&self) -> bool {
+        !self.frozen
+    }
+}
+
 pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     let feed = app.sip.debug_feed();
     let s = &mut app.debug.audio;
