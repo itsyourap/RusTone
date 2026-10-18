@@ -5,6 +5,7 @@
 
 mod app;
 mod icons;
+mod netwatch;
 mod sip;
 mod theme;
 mod tray;

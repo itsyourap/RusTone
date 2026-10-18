@@ -1339,6 +1339,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastframe-power"
+version = "0.10.0"
+source = "git+https://github.com/crmne/fastframe?tag=v0.10.0#0d454ef59ecb49aa70b8f4e743f996c19f8f5a80"
+dependencies = [
+ "log",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
 name = "fastframe-shell"
 version = "0.10.0"
 source = "git+https://github.com/crmne/fastframe?tag=v0.10.0#0d454ef59ecb49aa70b8f4e743f996c19f8f5a80"
@@ -1824,6 +1836,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1926,11 +1948,13 @@ dependencies = [
  "fastframe-icons",
  "fastframe-instance",
  "fastframe-log",
+ "fastframe-power",
  "fastframe-shell",
  "fastframe-text",
  "fastframe-theme",
  "fastframe-titlebar",
  "fastframe-tray",
+ "if-addrs",
  "rustone-core",
  "log",
  "resvg",

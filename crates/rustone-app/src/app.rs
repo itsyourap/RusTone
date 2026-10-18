@@ -13,6 +13,7 @@ use fastframe_tray::{Event, Tray};
 use rustone_core::secrets::{Keyring, MemoryStore, SecretStore};
 use rustone_core::settings::{Settings, WindowGeometry};
 
+use crate::netwatch::NetWatch;
 use crate::sip::{Sip, Status};
 use crate::theme::{self, Palette};
 use crate::tray;
@@ -47,6 +48,8 @@ pub struct App {
     requests: Requests,
     pub sip: Sip,
     secrets: Box<dyn SecretStore>,
+    power: fastframe_power::Power,
+    net: NetWatch,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -77,6 +80,7 @@ impl App {
             }
         }
         let sip = Sip::spawn(&settings, paths.sip_log, waker);
+        let (power_wake, net_wake) = (waker.clone(), waker.clone());
         let wake = waker.clone();
         Self {
             settings,
@@ -89,6 +93,8 @@ impl App {
             requests,
             sip,
             secrets,
+            power: fastframe_power::Power::spawn(move || power_wake.wake()),
+            net: NetWatch::spawn(move || net_wake.wake()),
             rendering: fastframe_text::detect(),
             next: Closed::Quit,
             quit_requested: false,
@@ -174,6 +180,30 @@ impl App {
 
     /// Pushes settings changes to the engine and engine events to the tray.
     fn update_sip(&mut self) {
+        for event in self.power.events() {
+            match event {
+                // pjsua is destroyed before sleep and recreated after.
+                fastframe_power::Event::Suspending(ack) => {
+                    log::info!("system suspending; stopping the SIP engine");
+                    self.sip.send(sip_engine::Command::Suspend);
+                    self.save_settings(true);
+                    self.files.flush(Duration::from_millis(1500));
+                    ack.done();
+                }
+                fastframe_power::Event::EndingSession(ack) => {
+                    self.save_settings(true);
+                    self.files.flush(Duration::from_millis(1500));
+                    ack.done();
+                }
+                fastframe_power::Event::Resumed => {
+                    log::info!("system resumed; starting the SIP engine");
+                    self.sip.send(sip_engine::Command::Resume);
+                }
+            }
+        }
+        if self.net.take_changed() && self.settings.sip.network_changes {
+            self.sip.send(sip_engine::Command::IpChanged);
+        }
         self.sip.sync(&self.settings);
         self.sip.poll();
         let status = self.status();

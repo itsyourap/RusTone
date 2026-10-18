@@ -28,6 +28,8 @@ fastframe-titlebar.workspace = true
 fastframe-log.workspace = true
 fastframe-dirs.workspace = true
 fastframe-file.workspace = true
+fastframe-power.workspace = true
+if-addrs = "0.15"
 resvg = "0.45"
 
 [lints.rust]

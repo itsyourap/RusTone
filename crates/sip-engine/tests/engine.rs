@@ -36,6 +36,10 @@ fn engine_lifecycle() {
 
     engine.send(Command::SetLocalAccount(Some(LocalAccountConfig::default())));
 
+    // A network change re-creates transports with the accounts in place.
+    engine.send(Command::IpChanged);
+    engine.send(Command::Reregister);
+
     // A registrar that refuses the connection fails quickly with a reason.
     engine.send(Command::SetAccount(Some(AccountConfig {
         server: "127.0.0.1:1".into(),

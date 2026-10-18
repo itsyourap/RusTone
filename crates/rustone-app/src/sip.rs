@@ -114,6 +114,12 @@ impl Sip {
         }
     }
 
+    pub fn send(&self, command: Command) {
+        if let Some(engine) = &self.engine {
+            engine.send(command);
+        }
+    }
+
     /// Applies queued engine events. Returns true if anything changed.
     pub fn poll(&mut self) -> bool {
         let events = std::mem::take(&mut *self.events.lock().unwrap_or_else(|e| e.into_inner()));
