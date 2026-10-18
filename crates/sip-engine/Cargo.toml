@@ -1,0 +1,11 @@
+[package]
+name = "sip-engine"
+description = "Safe, threaded wrapper around the pjsua C API of pjproject"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+pjsua-sys.workspace = true
+log.workspace = true

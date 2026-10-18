@@ -3482,6 +3482,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sip-engine"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pjsua-sys",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
