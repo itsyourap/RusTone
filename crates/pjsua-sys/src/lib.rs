@@ -20,11 +20,22 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::pjsip_cfg_t;
+    use super::{pjsip_cfg_t, pjsua_reg_info};
+    use std::ffi::{c_char, c_int};
 
     unsafe extern "C" {
         /// Equivalent of `pjsip_cfg()`: global SIP stack settings.
         pub fn jf_pjsip_cfg() -> *mut pjsip_cfg_t;
+
+        /// Copies header `name` from the response that completed a
+        /// registration into `buf` (NUL-terminated, truncated to fit).
+        /// Returns the value's full length, or -1 if absent.
+        pub fn jf_reg_info_header(
+            info: *const pjsua_reg_info,
+            name: *const c_char,
+            buf: *mut c_char,
+            buf_len: usize,
+        ) -> c_int;
 
         pub fn jf_sizeof_pjsua_config() -> usize;
         pub fn jf_sizeof_pjsua_media_config() -> usize;
