@@ -20,7 +20,7 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::{pj_pool_t, pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_reg_info};
+    use super::{pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_reg_info};
     use std::ffi::{c_char, c_int, c_short, c_uint};
 
     /// Called for every SIP message sent (`is_rx` 0) or received (1).
@@ -54,7 +54,7 @@ pub mod shim {
         pub tx_jitter_last_us: c_uint,
         pub rtt_last_us: c_uint,
         pub rtt_mean_us: c_uint,
-        pub jb_frame_ms: c_uint,
+        pub jb_frame_bytes: c_uint,
         pub jb_size: c_uint,
         pub jb_prefetch: c_uint,
         pub jb_avg_delay_ms: c_uint,
@@ -96,7 +96,9 @@ pub mod shim {
         pub fn jf_sizeof_jf_stream_snapshot() -> usize;
 
         /// Adds an audio tap to the conference bridge; returns its slot or -1.
-        pub fn jf_tap_add(tap_id: c_int, cb: TapCallback, p_pool: *mut *mut pj_pool_t, p_port: *mut *mut pjmedia_port) -> c_int;
+        /// Remove with `pjsua_conf_remove_port` then `pjmedia_port_destroy`;
+        /// the tap releases its own pool once the bridge lets go of it.
+        pub fn jf_tap_add(tap_id: c_int, cb: TapCallback, p_port: *mut *mut pjmedia_port) -> c_int;
 
         pub fn jf_sizeof_pjsua_config() -> usize;
         pub fn jf_sizeof_pjsua_media_config() -> usize;

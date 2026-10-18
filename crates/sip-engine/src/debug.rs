@@ -189,7 +189,8 @@ pub struct StreamStats {
     pub tx_jitter_ms: f32,
     pub rtt_ms: f32,
     pub rtt_mean_ms: f32,
-    pub jb_frame_ms: u32,
+    /// Size of one jitter-buffer frame, bytes.
+    pub jb_frame_bytes: u32,
     pub jb_frames: u32,
     pub jb_prefetch: u32,
     pub jb_delay_ms: u32,

@@ -223,6 +223,14 @@ unsafe impl Send for Tonegen {}
 
 static TONEGENS: LazyLock<Mutex<HashMap<ToneKey, Tonegen>>> = LazyLock::new(Mutex::default);
 
+/// Pools of removed tone generators. The bridge removes ports
+/// asynchronously and pjmedia's tonegen doesn't own its pool, so pools are
+/// released only when the session ends.
+struct RetiredPool(*mut pj_pool_t);
+// SAFETY: only released once, under the lock, on the engine thread.
+unsafe impl Send for RetiredPool {}
+static RETIRED: Mutex<Vec<RetiredPool>> = Mutex::new(Vec::new());
+
 /// Plays DTMF `digits` (160 ms on, 50 ms off, at most 16) on the tone
 /// generator for `key`, creating it on first use.
 pub fn play_digits(key: ToneKey, digits: &str) -> bool {
@@ -283,9 +291,14 @@ pub fn drop_tonegen(key: ToneKey) {
     }
 }
 
+/// Removes every tone generator and frees their pools (session end).
 pub fn drop_all_tonegens() {
     for (_, tg) in lock(&TONEGENS).drain() {
         destroy_tonegen(tg);
+    }
+    for pool in lock(&RETIRED).drain(..) {
+        // SAFETY: the ports using them were removed earlier.
+        unsafe { pj_pool_release(pool.0) };
     }
 }
 
@@ -294,8 +307,8 @@ fn destroy_tonegen(tg: Tonegen) {
     unsafe {
         pjsua_conf_remove_port(tg.slot);
         pjmedia_port_destroy(tg.port);
-        pj_pool_release(tg.pool);
     }
+    lock(&RETIRED).push(RetiredPool(tg.pool));
 }
 
 // ---------------------------------------------------------------------------

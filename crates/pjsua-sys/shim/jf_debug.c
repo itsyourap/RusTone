@@ -79,7 +79,7 @@ typedef struct jf_stream_snapshot {
     /* As reported back by the remote in RTCP. */
     unsigned tx_loss, tx_jitter_last_us;
     unsigned rtt_last_us, rtt_mean_us;
-    unsigned jb_frame_ms, jb_size, jb_prefetch, jb_avg_delay_ms;
+    unsigned jb_frame_bytes, jb_size, jb_prefetch, jb_avg_delay_ms;
     unsigned jb_lost, jb_discard, jb_empty;
 } jf_stream_snapshot;
 
@@ -125,7 +125,8 @@ pj_status_t jf_call_stream_snapshot(pjsua_call_id call_id, jf_stream_snapshot *o
     status = pjsua_call_get_stream_stat(call_id, med, &st);
     if (status != PJ_SUCCESS)
         return status;
-    pj_gettickcount(&now);
+    /* pjmedia stamps the stream start with wall-clock time. */
+    pj_gettimeofday(&now);
     PJ_TIME_VAL_SUB(now, st.rtcp.start);
     out->duration_ms = (unsigned)PJ_TIME_VAL_MSEC(now);
     out->tx_pkt = st.rtcp.tx.pkt;
@@ -143,7 +144,7 @@ pj_status_t jf_call_stream_snapshot(pjsua_call_id call_id, jf_stream_snapshot *o
     out->tx_jitter_last_us = st.rtcp.tx.jitter.last;
     out->rtt_last_us = st.rtcp.rtt.last;
     out->rtt_mean_us = (unsigned)st.rtcp.rtt.mean;
-    out->jb_frame_ms = st.jbuf.frame_size;
+    out->jb_frame_bytes = st.jbuf.frame_size;
     out->jb_size = st.jbuf.size;
     out->jb_prefetch = st.jbuf.prefetch;
     out->jb_avg_delay_ms = st.jbuf.avg_delay;
@@ -161,6 +162,7 @@ typedef void (*jf_tap_cb)(int tap_id, const short *samples, size_t count,
 
 typedef struct jf_tap {
     pjmedia_port base;
+    pj_pool_t *pool;
     jf_tap_cb cb;
     int id;
 } jf_tap;
@@ -175,6 +177,17 @@ static pj_status_t jf_tap_put_frame(pjmedia_port *port, pjmedia_frame *frame)
     return PJ_SUCCESS;
 }
 
+/* The bridge removes ports asynchronously, so the tap owns its pool and
+ * releases it here, once the last reference is gone (pjproject PR #3928). */
+static pj_status_t jf_tap_on_destroy(pjmedia_port *port)
+{
+    jf_tap *tap = (jf_tap *)port;
+    tap->cb = NULL;
+    if (tap->pool)
+        pj_pool_safe_release(&tap->pool);
+    return PJ_SUCCESS;
+}
+
 static pj_status_t jf_tap_get_frame(pjmedia_port *port, pjmedia_frame *frame)
 {
     PJ_UNUSED_ARG(port);
@@ -184,8 +197,9 @@ static pj_status_t jf_tap_get_frame(pjmedia_port *port, pjmedia_frame *frame)
 }
 
 /* Creates a tap in the conference bridge's format and adds it to the
- * bridge. Returns its slot, or -1. `*p_pool`/`*p_port` are for removal. */
-int jf_tap_add(int tap_id, jf_tap_cb cb, pj_pool_t **p_pool, pjmedia_port **p_port)
+ * bridge. Returns its slot, or -1. Remove it with pjsua_conf_remove_port()
+ * then pjmedia_port_destroy(*p_port); its pool is released in on_destroy. */
+int jf_tap_add(int tap_id, jf_tap_cb cb, pjmedia_port **p_port)
 {
     pjsua_conf_port_info master;
     pj_pool_t *pool;
@@ -205,13 +219,14 @@ int jf_tap_add(int tap_id, jf_tap_cb cb, pj_pool_t **p_pool, pjmedia_port **p_po
                            master.samples_per_frame);
     tap->base.put_frame = &jf_tap_put_frame;
     tap->base.get_frame = &jf_tap_get_frame;
+    tap->base.on_destroy = &jf_tap_on_destroy;
+    tap->pool = pool;
     tap->cb = cb;
     tap->id = tap_id;
     if (pjsua_conf_add_port(pool, &tap->base, &slot) != PJ_SUCCESS) {
         pj_pool_release(pool);
         return -1;
     }
-    *p_pool = pool;
     *p_port = &tap->base;
     return slot;
 }

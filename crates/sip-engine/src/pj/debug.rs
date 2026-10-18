@@ -147,7 +147,7 @@ fn stream_stats(call: CallId) -> Option<StreamStats> {
         tx_jitter_ms: ms(s.tx_jitter_last_us),
         rtt_ms: ms(s.rtt_last_us),
         rtt_mean_ms: ms(s.rtt_mean_us),
-        jb_frame_ms: s.jb_frame_ms,
+        jb_frame_bytes: s.jb_frame_bytes,
         jb_frames: s.jb_size,
         jb_prefetch: s.jb_prefetch,
         jb_delay_ms: s.jb_avg_delay_ms,
@@ -158,7 +158,6 @@ fn stream_stats(call: CallId) -> Option<StreamStats> {
 }
 
 struct Tap {
-    pool: *mut pj_pool_t,
     port: *mut pjmedia_port,
     slot: pjsua_conf_port_id,
 }
@@ -188,19 +187,18 @@ unsafe extern "C" fn on_audio(tap_id: c_int, samples: *const c_short, count: usi
 }
 
 fn create_tap(id: c_int) -> Option<Tap> {
-    let mut pool = std::ptr::null_mut();
     let mut port = std::ptr::null_mut();
     // SAFETY: the shim adds a port to the running bridge.
-    let slot = unsafe { shim::jf_tap_add(id, on_audio, &mut pool, &mut port) };
-    (slot >= 0).then_some(Tap { pool, port, slot })
+    let slot = unsafe { shim::jf_tap_add(id, on_audio, &mut port) };
+    (slot >= 0).then_some(Tap { port, slot })
 }
 
 fn destroy_tap(tap: Tap) {
-    // SAFETY: created by `create_tap`, removed once.
+    // SAFETY: created by `create_tap`, removed once. The tap frees its own
+    // pool when the bridge has finished removing it.
     unsafe {
         pjsua_conf_remove_port(tap.slot);
         pjmedia_port_destroy(tap.port);
-        pj_pool_release(tap.pool);
     }
 }
 
