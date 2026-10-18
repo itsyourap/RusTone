@@ -87,11 +87,13 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         let row_height = 18.0;
         let mut area = egui::ScrollArea::both().auto_shrink(false).stick_to_bottom(s.follow);
         if s.follow && lines.len() != s.seen {
-            area = area.vertical_scroll_offset(f32::MAX);
+            area = area.vertical_scroll_offset(lines.len() as f32 * row_height);
         }
         s.seen = lines.len();
         area.show_rows(ui, row_height, lines.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            // The range can run past the end for a frame after a jump.
+            let range = range.start.min(lines.len())..range.end.min(lines.len());
             for line in &lines[range] {
                 let mut job = egui::text::LayoutJob::default();
                 let mut part = |text: &str, color: egui::Color32| {

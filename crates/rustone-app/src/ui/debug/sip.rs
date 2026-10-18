@@ -122,11 +122,13 @@ fn list(ui: &mut Ui, p: &Palette, s: &mut SipState, messages: &[Arc<SipMessage>]
     let row_height = 46.0;
     let mut area = egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(s.follow);
     if s.follow && messages.len() != s.seen {
-        area = area.vertical_scroll_offset(f32::MAX);
+        area = area.vertical_scroll_offset(messages.len() as f32 * (row_height + 4.0));
     }
     s.seen = messages.len();
     area.show_rows(ui, row_height, messages.len(), |ui, range| {
         ui.spacing_mut().item_spacing.y = 4.0;
+        // The range can run past the end for a frame after a jump.
+        let range = range.start.min(messages.len())..range.end.min(messages.len());
         for m in &messages[range] {
             let selected = s.selected == Some(m.seq);
             if card(ui, p, m, selected, row_height - 4.0).clicked() {
