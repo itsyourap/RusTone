@@ -15,6 +15,7 @@ mod event;
 #[cfg(windows)]
 mod hotplug;
 mod pj;
+mod quality;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +28,7 @@ pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, Me
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
 pub use pj::CallOptions;
+pub use quality::CallQuality;
 
 /// Receives engine events. Called from pjsua's threads: keep it short.
 pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
@@ -70,9 +72,10 @@ pub enum Command {
     Transfer { call: CallId, target: String },
     /// Attended transfer: join `call`'s party with `with`'s.
     AttendedTransfer { call: CallId, with: CallId },
-    /// Sample the sound device's signal levels into [`Engine::meters`]
-    /// every 100 ms (while a call is shown).
-    SetMeters(bool),
+    /// While a call is live: sample the sound device's signal levels into
+    /// [`Engine::meters`] every 100 ms and report [`Event::CallQuality`]
+    /// every second.
+    MonitorCalls(bool),
     /// Speaker and microphone levels; applies without a restart.
     SetLevels(Levels),
     /// Use these sound devices (by name); applies without a restart.
@@ -153,7 +156,7 @@ impl Engine {
         self.debug.clone()
     }
 
-    /// Live microphone and speaker levels (see [`Command::SetMeters`]).
+    /// Live microphone and speaker levels (see [`Command::MonitorCalls`]).
     pub fn meters(&self) -> Arc<Meters> {
         self.meters.clone()
     }
@@ -182,6 +185,8 @@ const DEVICE_SETTLE: Duration = Duration::from_millis(1500);
 const STATS_INTERVAL: Duration = Duration::from_secs(1);
 /// The VU meter timer.
 const METER_INTERVAL: Duration = Duration::from_millis(100);
+/// The call timer, which updates the quality icon.
+const QUALITY_INTERVAL: Duration = Duration::from_secs(1);
 
 fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>, meters: Arc<Meters>) {
     pj::install_sink(sink.clone());
@@ -205,11 +210,13 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut devices_due: Option<Instant> = None;
     let mut meters_on = false;
     let mut next_meter = Instant::now();
+    let mut next_quality = Instant::now();
+    let mut quality = pj::QualityMonitor::default();
 
     loop {
         // Wake for the next timer: device refresh, or (while debugging)
         // sampling stream statistics.
-        let deadline = [devices_due, debug_on.then_some(next_stats), meters_on.then_some(next_meter)].into_iter().flatten().min();
+        let deadline = [devices_due, debug_on.then_some(next_stats), meters_on.then_some(next_meter), meters_on.then_some(next_quality)].into_iter().flatten().min();
         let received = match deadline {
             None => rx.recv(),
             Some(deadline) => match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -228,6 +235,14 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                         next_meter = now + METER_INTERVAL;
                         let (mic, speaker) = if session.is_some() { pj::signal_levels() } else { (0, 0) };
                         meters.set(mic, speaker);
+                    }
+                    if meters_on && next_quality <= now {
+                        next_quality = now + QUALITY_INTERVAL;
+                        if session.is_some() {
+                            for q in quality.sample() {
+                                sink(Event::CallQuality(q));
+                            }
+                        }
                     }
                     if debug_on && next_stats <= now {
                         next_stats = now + STATS_INTERVAL;
@@ -302,9 +317,10 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
-            Command::SetMeters(on) => {
+            Command::MonitorCalls(on) => {
                 meters_on = on;
                 next_meter = Instant::now();
+                next_quality = Instant::now() + QUALITY_INTERVAL;
                 if !on {
                     meters.set(0, 0);
                 }
@@ -375,7 +391,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::SetCallOptions(_)
         | Command::SetAudioDevices(_)
         | Command::SetLevels(_)
-        | Command::SetMeters(_)
+        | Command::MonitorCalls(_)
         | Command::SetDebug(_) => {}
     }
 }

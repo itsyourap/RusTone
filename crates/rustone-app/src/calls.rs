@@ -38,11 +38,13 @@ pub struct Call {
     pub transfer: Option<String>,
     /// Hold requested and not yet reflected in the media state.
     hold_requested: bool,
+    /// Latest quality sample while media flows.
+    pub quality: Option<sip_engine::CallQuality>,
 }
 
 impl Call {
     fn new(info: CallInfo) -> Self {
-        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false }
+        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None }
     }
 
     pub fn id(&self) -> CallId {
@@ -196,6 +198,11 @@ impl CallBook {
             Event::Call(info) => self.update(info, cfg, &mut out),
             Event::CallFailed { target, reason } => self.notify(format!("Couldn't call {target}: {reason}")),
             Event::CallError { reason, .. } => self.notify(reason.clone()),
+            Event::CallQuality(q) => {
+                if let Some(c) = self.get_mut(q.call) {
+                    c.quality = Some(q.clone());
+                }
+            }
             Event::TransferStatus { call, code, text, done } => {
                 if let Some(c) = self.get_mut(*call) {
                     c.transfer = Some(if *done && (200..300).contains(code) { "Transferred".into() } else { format!("Transfer: {code} {text}") });

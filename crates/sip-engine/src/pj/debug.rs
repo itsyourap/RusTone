@@ -114,7 +114,7 @@ pub fn call_ended(call: CallId) {
     }
 }
 
-fn stream_stats(call: CallId) -> Option<StreamStats> {
+pub fn stream_stats(call: CallId) -> Option<StreamStats> {
     let mut s = std::mem::MaybeUninit::<shim::StreamSnapshot>::zeroed();
     // SAFETY: the shim fills the plain struct.
     if unsafe { shim::jf_call_stream_snapshot(call, s.as_mut_ptr()) } != PJ_SUCCESS {
@@ -130,6 +130,7 @@ fn stream_stats(call: CallId) -> Option<StreamStats> {
         codec: text(&s.codec),
         clock_rate: s.clock_rate,
         channels: s.channels,
+        avg_bps: s.avg_bps,
         remote: text(&s.remote),
         duration_ms: s.duration_ms,
         tx_packets: s.tx_pkt,

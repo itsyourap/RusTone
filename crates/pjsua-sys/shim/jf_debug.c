@@ -81,6 +81,8 @@ typedef struct jf_stream_snapshot {
     unsigned rtt_last_us, rtt_mean_us;
     unsigned jb_frame_bytes, jb_size, jb_prefetch, jb_avg_delay_ms;
     unsigned jb_lost, jb_discard, jb_empty;
+    /* The codec's average bitrate, bits/s. */
+    unsigned avg_bps;
 } jf_stream_snapshot;
 
 size_t jf_sizeof_jf_stream_snapshot(void) { return sizeof(jf_stream_snapshot); }
@@ -119,6 +121,8 @@ pj_status_t jf_call_stream_snapshot(pjsua_call_id call_id, jf_stream_snapshot *o
     out->codec[n] = '\0';
     out->clock_rate = si.info.aud.fmt.clock_rate;
     out->channels = si.info.aud.fmt.channel_cnt;
+    if (si.info.aud.param)
+        out->avg_bps = si.info.aud.param->info.avg_bps;
     if (pj_sockaddr_has_addr(&si.info.aud.rem_addr))
         pj_sockaddr_print(&si.info.aud.rem_addr, out->remote, sizeof(out->remote), 3);
 

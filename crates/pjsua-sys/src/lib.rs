@@ -61,6 +61,8 @@ pub mod shim {
         pub jb_lost: c_uint,
         pub jb_discard: c_uint,
         pub jb_empty: c_uint,
+        /// The codec's average bitrate, bits/s.
+        pub avg_bps: c_uint,
     }
 
     unsafe extern "C" {

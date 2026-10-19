@@ -156,7 +156,7 @@ impl Sip {
         // The VU meter only matters while a call is shown.
         let meters = self.calls.live_count() > 0;
         if self.applied.meters != Some(meters) {
-            engine.send(Command::SetMeters(meters));
+            engine.send(Command::MonitorCalls(meters));
             self.applied.meters = Some(meters);
         }
         self.calls.ring_level = f32::from(settings.audio.volume_ring.min(100)) / 100.0;

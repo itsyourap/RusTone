@@ -99,11 +99,37 @@ fn party_header(ui: &mut Ui, p: &Palette, call: &Call, compact: bool) {
     }
     let status_color = if call.ended.is_some() { p.danger } else { p.secondary };
     ui.label(egui::RichText::new(call.status_text()).font(Weight::Medium.font_id(15.0)).color(status_color));
+    if let Some(q) = call.quality.as_ref().filter(|_| call.ended.is_none() && call.info.media == MediaState::Active) {
+        quality_line(ui, p, q);
+    }
     if let Some(from) = &call.info.diversion {
         ui.label(egui::RichText::new(format!("Forwarded from {from}")).size(12.0).color(p.dim));
     }
     if let Some(transfer) = &call.transfer {
         ui.label(egui::RichText::new(transfer).size(12.0).color(p.dim));
+    }
+}
+
+/// The quality icon as a coloured dot and a word, with the codec:
+/// MOS above 3 is good, above 2 fair, otherwise poor.
+fn quality_line(ui: &mut Ui, p: &Palette, q: &sip_engine::CallQuality) {
+    let (word, color) = quality_word(q.mos, p);
+    let text = format!("{word} · {}", q.codec);
+    let galley = ui.painter().layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), p.secondary);
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 14.0, galley.size().y.max(12.0)), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Call quality: {text}")));
+    ui.painter().circle_filled(egui::pos2(rect.left() + 4.0, rect.center().y), 4.0, color);
+    ui.painter().galley(egui::pos2(rect.left() + 14.0, rect.center().y - galley.size().y / 2.0), galley, p.secondary);
+    response.on_hover_text(format!("Estimated quality (MOS) {:.1} of 4.5", q.mos));
+}
+
+fn quality_word(mos: f32, p: &Palette) -> (&'static str, egui::Color32) {
+    if mos <= 2.0 {
+        ("Poor", p.danger)
+    } else if mos <= 3.0 {
+        ("Fair", p.warning)
+    } else {
+        ("Good", p.success)
     }
 }
 

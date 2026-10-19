@@ -150,7 +150,7 @@ fn call_to_self_over_the_local_account() {
     std::thread::sleep(Duration::from_millis(500));
 
     // The VU meter sees what goes to the speaker (the null device here).
-    engine.send(Command::SetMeters(true));
+    engine.send(Command::MonitorCalls(true));
     engine.send(Command::PlaySound(Sound { path: tone_wav(), looping: true, level: 1.0, ring: false }));
     let meters = engine.meters();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -158,8 +158,16 @@ fn call_to_self_over_the_local_account() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(meters.speaker() > 0.0, "the speaker meter moves while a tone plays");
+    // Quality comes once a second for the answered calls.
+    match wait_for(&rx, "CallQuality", |e| matches!(e, Event::CallQuality(_))) {
+        Event::CallQuality(q) => {
+            assert!((1.0..=4.5).contains(&q.mos), "{q:?}");
+            assert!(q.codec.starts_with("PCMU@8kHz"), "{q:?}");
+        }
+        _ => unreachable!(),
+    }
     engine.send(Command::StopSound);
-    engine.send(Command::SetMeters(false));
+    engine.send(Command::MonitorCalls(false));
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(meters.speaker(), 0.0, "meters off reads zero");
 

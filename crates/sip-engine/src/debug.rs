@@ -171,6 +171,8 @@ pub struct StreamStats {
     pub codec: String,
     pub clock_rate: u32,
     pub channels: u32,
+    /// The codec's average bitrate, bits/s.
+    pub avg_bps: u32,
     pub remote: String,
     pub duration_ms: u32,
     pub tx_packets: u32,

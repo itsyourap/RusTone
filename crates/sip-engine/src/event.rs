@@ -2,6 +2,7 @@
 
 use crate::audio::AudioDevice;
 use crate::call::{CallId, CallInfo, CodecInfo};
+use crate::quality::CallQuality;
 
 /// Events are delivered on pjsua's worker threads or the engine thread; the
 /// sink must be cheap and must not block (queue them and wake the UI).
@@ -13,6 +14,8 @@ pub enum Event {
     Codecs(Vec<CodecInfo>),
     /// The sound devices pjsua sees (after start and after hot-plug).
     AudioDevices(Vec<AudioDevice>),
+    /// A live call's quality, every second while calls are monitored.
+    CallQuality(CallQuality),
     /// pjsua could not start; the engine waits for a new configuration.
     Failed(String),
     /// pjsua was shut down (suspend, or before a restart).
