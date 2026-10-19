@@ -3616,6 +3616,8 @@ version = "0.1.0"
 dependencies = [
  "log",
  "pjsua-sys",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

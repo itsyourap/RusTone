@@ -419,15 +419,44 @@ impl Session {
         if self.null_audio || self.device_ids == old {
             return;
         }
-        match audio::current() {
-            Some((_, playback)) => {
-                let ringing = !calls::any_call_audio() && playback == old.ring && old.ring != old.output;
-                let output = if ringing { self.device_ids.ring } else { self.device_ids.output };
-                audio::open(self.device_ids.input, output, true);
+        let ringing = audio::current().is_some_and(|(_, playback)| ringing(old, playback));
+        self.reapply_devices(audio::current().is_some(), ringing);
+    }
+
+    /// Re-reads the device list after Windows reported a change, keeping
+    /// the open device in use:
+    /// close it, refresh, then open the wanted devices again, falling back
+    /// to the default for any that went away.
+    pub fn refresh_devices(&mut self) {
+        if self.null_audio {
+            return;
+        }
+        let active = audio::current();
+        let was_ringing = active.is_some_and(|(_, playback)| ringing(self.device_ids, playback));
+        // SAFETY: on the engine thread with pjsua running.
+        unsafe {
+            if active.is_some() {
+                pjsua_set_null_snd_dev();
             }
+            pjmedia_aud_dev_refresh();
+        }
+        self.devices = audio::devices();
+        self.device_ids = DeviceIds::resolve(&self.wanted_devices, &self.devices);
+        log::info!("sound devices changed: {}", self.devices.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", "));
+        self.reapply_devices(active.is_some(), was_ringing);
+    }
+
+    /// Opens the resolved devices again if one was open (the ring device if
+    /// that was playing); otherwise only selects them, since indexes may
+    /// have changed.
+    fn reapply_devices(&self, was_open: bool, was_ringing: bool) {
+        let ids = self.device_ids;
+        if was_open {
+            audio::open(ids.input, if was_ringing { ids.ring } else { ids.output }, true);
+        } else {
             // Whatever opens the device next (early media, the debug
             // window's taps) gets these.
-            None => audio::select(self.device_ids.input, self.device_ids.output),
+            audio::select(ids.input, ids.output);
         }
     }
 
@@ -618,6 +647,11 @@ impl Drop for Session {
     fn drop(&mut self) {
         self.destroy();
     }
+}
+
+/// Whether `playback` is the ring device in use for ringing (no call audio).
+fn ringing(ids: DeviceIds, playback: i32) -> bool {
+    !calls::any_call_audio() && playback == ids.ring && ids.ring != ids.output
 }
 
 fn create_transport(kind: pjsip_transport_type_e, port: u16) -> Result<pjsua_transport_id, String> {

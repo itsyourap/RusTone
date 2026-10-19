@@ -12,12 +12,15 @@ mod call;
 mod config;
 pub mod debug;
 mod event;
+#[cfg(windows)]
+mod hotplug;
 mod pj;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 pub use audio::{AudioDevice, AudioDevices};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
@@ -80,6 +83,8 @@ pub(crate) enum Message {
     Command(Box<Command>),
     /// A non-looping sound finished (from a media thread).
     PlayerEnded(i32),
+    /// Windows reported a sound device change (from a COM thread).
+    DevicesChanged,
     Shutdown,
 }
 
@@ -158,8 +163,22 @@ impl Drop for Engine {
 
 /// The engine thread: owns the pjsua session and the wanted accounts, so a
 /// restart or resume brings them back.
+/// Sound device changes come in bursts; wait this long after the last one.
+const DEVICE_SETTLE: Duration = Duration::from_millis(1500);
+/// How often stream statistics are sampled while debugging.
+const STATS_INTERVAL: Duration = Duration::from_secs(1);
+
 fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>) {
     pj::install_sink(sink.clone());
+    #[cfg(windows)]
+    let _watcher = {
+        let tx = tx.clone();
+        hotplug::DeviceWatcher::start(move || {
+            let _ = tx.send(Message::DevicesChanged);
+        })
+        .map_err(|e| log::warn!("no sound device notifications: {e}"))
+        .ok()
+    };
     pj::set_engine_tx(Some(tx));
     let mut account: Option<AccountConfig> = None;
     let mut local: Option<LocalAccountConfig> = None;
@@ -167,25 +186,43 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut session = start(&config, &sink);
     let mut suspended = false;
     let mut debug_on = false;
+    let mut next_stats = Instant::now();
+    let mut devices_due: Option<Instant> = None;
 
     loop {
-        // While debugging, wake once a second to sample stream statistics.
-        let received = if debug_on {
-            match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+        // Wake for the next timer: device refresh, or (while debugging)
+        // sampling stream statistics.
+        let deadline = [devices_due, debug_on.then_some(next_stats)].into_iter().flatten().min();
+        let received = match deadline {
+            None => rx.recv(),
+            Some(deadline) => match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(message) => Ok(message),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Err(mpsc::RecvError),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if session.is_some() {
-                        pj::debug::poll_streams();
+                    let now = Instant::now();
+                    if devices_due.is_some_and(|due| due <= now) {
+                        devices_due = None;
+                        if let Some(s) = &mut session {
+                            s.refresh_devices();
+                            sink(Event::AudioDevices(s.audio_devices().to_vec()));
+                        }
+                    }
+                    if debug_on && next_stats <= now {
+                        next_stats = now + STATS_INTERVAL;
+                        if session.is_some() {
+                            pj::debug::poll_streams();
+                        }
                     }
                     continue;
                 }
-                Ok(message) => Ok(message),
-                Err(mpsc::RecvTimeoutError::Disconnected) => Err(mpsc::RecvError),
-            }
-        } else {
-            rx.recv()
+            },
         };
         let command = match received {
             Ok(Message::Command(command)) => *command,
+            Ok(Message::DevicesChanged) => {
+                devices_due = Some(Instant::now() + DEVICE_SETTLE);
+                continue;
+            }
             Ok(Message::PlayerEnded(id)) => {
                 if let Some(s) = &mut session {
                     s.sound_ended(id);
@@ -249,6 +286,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
             }
             Command::SetDebug(on) => {
                 debug_on = on;
+                next_stats = Instant::now() + STATS_INTERVAL;
                 pj::debug::feed_enabled(on);
                 if session.is_some() {
                     pj::debug::apply(on);

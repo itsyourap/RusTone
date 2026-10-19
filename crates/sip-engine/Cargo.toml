@@ -9,3 +9,8 @@ publish.workspace = true
 [dependencies]
 pjsua-sys.workspace = true
 log.workspace = true
+
+# Sound-device hot-plug notifications (IMMNotificationClient).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_Foundation", "Win32_UI_Shell_PropertiesSystem"] }
+windows-core = "0.62"
