@@ -26,9 +26,25 @@ pub struct Paths {
     pub sounds: PathBuf,
     /// The opt-in full SIP log.
     pub sip_log: PathBuf,
+    /// The data folders were just renamed from "RusTone": move the passwords too.
+    pub renamed_from_rustone: bool,
 }
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
+/// Credential Manager entries are `<account key>.RusTone`.
+const CREDENTIAL_SERVICE: &str = "RusTone";
+
+/// Moves passwords stored under the app's old name ("RusTone").
+fn move_old_passwords(store: &Keyring, settings: &Settings) {
+    let old = store.with_service("RusTone");
+    for account in &settings.accounts {
+        match rustone_core::secrets::move_secret(&old, store, &account.secret_key()) {
+            Ok(true) => log::info!("moved the password of account {} to the RusTone credential", account.id),
+            Ok(false) => {}
+            Err(e) => log::warn!("cannot move the password of account {}: {e}", account.id),
+        }
+    }
+}
 
 /// Requests from other launches (`fastframe-instance`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,8 +87,13 @@ pub struct App {
 
 impl App {
     pub fn new(mut settings: Settings, paths: Paths, requests: Requests, waker: &Waker) -> Self {
-        let secrets: Box<dyn SecretStore> = match Keyring::init("RusTone") {
-            Ok(store) => Box::new(store),
+        let secrets: Box<dyn SecretStore> = match Keyring::init(CREDENTIAL_SERVICE) {
+            Ok(store) => {
+                if paths.renamed_from_rustone {
+                    move_old_passwords(&store, &settings);
+                }
+                Box::new(store)
+            }
             Err(e) => {
                 log::warn!("credential store unavailable ({e}); passwords won't be remembered");
                 Box::new(MemoryStore::default())

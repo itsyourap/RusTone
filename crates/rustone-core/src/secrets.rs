@@ -28,6 +28,11 @@ impl Keyring {
         Ok(Self { service: service.to_owned() })
     }
 
+    /// The same store under another service name.
+    pub fn with_service(&self, service: &str) -> Self {
+        Self { service: service.to_owned() }
+    }
+
     fn entry(&self, key: &str) -> Result<keyring_core::Entry, String> {
         keyring_core::Entry::new(&self.service, key).map_err(|e| e.to_string())
     }
@@ -55,6 +60,20 @@ impl SecretStore for Keyring {
             Err(e) => Err(e.to_string()),
         }
     }
+}
+
+/// Moves the secret under `key` from one store to another. The old entry
+/// is deleted before the new one is written, so this is also safe when both
+/// names reach the same entry (Credential Manager ignores case); if writing
+/// fails the old entry is put back. Returns whether there was a secret.
+pub fn move_secret(from: &dyn SecretStore, to: &dyn SecretStore, key: &str) -> Result<bool, String> {
+    let Some(secret) = from.get(key)? else { return Ok(false) };
+    from.delete(key)?;
+    if let Err(e) = to.set(key, &secret) {
+        from.set(key, &secret)?;
+        return Err(e);
+    }
+    Ok(true)
 }
 
 /// In-memory store, for tests and as a fallback when the OS store fails.
@@ -101,11 +120,33 @@ mod tests {
         exercise(&MemoryStore::default(), "k");
     }
 
+    #[test]
+    fn secrets_move_between_stores() {
+        let (old, new) = (MemoryStore::default(), MemoryStore::default());
+        old.set("acc", "pw").unwrap();
+        assert!(move_secret(&old, &new, "acc").unwrap());
+        assert_eq!((old.get("acc").unwrap(), new.get("acc").unwrap().as_deref()), (None, Some("pw")));
+        assert!(!move_secret(&old, &new, "missing").unwrap());
+    }
+
     /// Writes and removes one entry in Windows Credential Manager.
     #[cfg(windows)]
     #[test]
     fn windows_credential_manager() {
         let store = Keyring::init("RusTone-test").unwrap();
         exercise(&store, "unit-test-entry");
+    }
+
+    /// The RusTone → RusTone rename: names differing only in case.
+    #[cfg(windows)]
+    #[test]
+    fn windows_credentials_survive_a_case_rename() {
+        let new = Keyring::init("RusTone-rename-test").unwrap();
+        let old = new.with_service("RusTone-rename-test");
+        old.set("acc", "pw").unwrap();
+        assert!(move_secret(&old, &new, "acc").unwrap());
+        assert_eq!(new.get("acc").unwrap().as_deref(), Some("pw"));
+        new.delete("acc").unwrap();
+        old.delete("acc").unwrap();
     }
 }

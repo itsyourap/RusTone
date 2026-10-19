@@ -28,8 +28,33 @@ const INSTANCE_ID: &str = "dev.itsyourap.rustone";
 const DIRS: fastframe_dirs::App = fastframe_dirs::App {
     // Not copied into a portable folder: the running copy's lock and logs.
     not_copied: &["instance", "rustone.log", "panic.log"],
-    ..fastframe_dirs::App::new("rustone", "dev", "itsyourap", "RusTone")
+    ..fastframe_dirs::App::new("rustone", "dev", "itsyourap", APP_FOLDER)
 };
+/// The data folders' name under `%APPDATA%\itsyourap` and `%LOCALAPPDATA%\itsyourap`.
+const APP_FOLDER: &str = "RusTone";
+
+/// Renames data folders from the app's old name ("RusTone") to [`APP_FOLDER`].
+/// Windows paths ignore case, so they keep working either way; a failure
+/// (e.g. another copy still has them open) is only reported. Returns what
+/// was renamed and what failed, for the log.
+fn rename_old_folders() -> (Vec<PathBuf>, Vec<String>) {
+    let (mut renamed, mut failed) = (Vec::new(), Vec::new());
+    for var in ["APPDATA", "LOCALAPPDATA"] {
+        let Some(base) = std::env::var_os(var).map(|b| PathBuf::from(b).join("itsyourap")) else { continue };
+        let Ok(entries) = std::fs::read_dir(&base) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.eq_ignore_ascii_case(APP_FOLDER) && name != APP_FOLDER {
+                let target = base.join(APP_FOLDER);
+                match std::fs::rename(entry.path(), &target) {
+                    Ok(()) => renamed.push(target),
+                    Err(e) => failed.push(format!("{}: {e}", entry.path().display())),
+                }
+            }
+        }
+    }
+    (renamed, failed)
+}
 
 #[derive(Debug, Default)]
 struct Args {
@@ -52,6 +77,8 @@ impl Args {
 
 fn main() -> ExitCode {
     let args = Args::parse(std::env::args().skip(1));
+    // Before anything opens files in them (the instance lock lives there).
+    let (renamed, rename_failed) = rename_old_folders();
     let waker = Waker::default();
     let requests = Requests::default();
 
@@ -89,13 +116,19 @@ fn main() -> ExitCode {
         eprintln!("logging unavailable: {e}");
     }
     log::info!("data folders: {:?}", found.mode);
+    for folder in &renamed {
+        log::info!("renamed data folder to {}", folder.display());
+    }
+    for failure in &rename_failed {
+        log::warn!("cannot rename data folder {failure}");
+    }
 
     let settings_path = dirs.config.join(settings::FILE_NAME);
     let settings = load_settings(&settings_path);
 
     fastframe_titlebar::init();
     let start_hidden = args.minimized || settings.ui.start_minimized;
-    let paths = Paths { settings: settings_path, sounds: dirs.cache.join("sounds"), sip_log: dirs.state.join("sip.log") };
+    let paths = Paths { settings: settings_path, sounds: dirs.cache.join("sounds"), sip_log: dirs.state.join("sip.log"), renamed_from_rustone: !renamed.is_empty() };
     let app = App::new(settings, paths, requests, &waker);
 
     let shell = Shell::new(app, &waker).start_hidden(start_hidden);
