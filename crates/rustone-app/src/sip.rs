@@ -317,6 +317,7 @@ fn call_options(settings: &Settings) -> CallOptions {
             M::SipInfo => sip_engine::DtmfMethod::SipInfo,
         },
         local_dtmf: settings.calls.local_dtmf,
+        force_codec: settings.sip.force_codec,
     }
 }
 

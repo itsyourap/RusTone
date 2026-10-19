@@ -46,9 +46,13 @@ pub struct SipSettings {
     pub network_changes: bool,
     /// Enabled audio codecs in priority order, space-separated.
     pub audio_codecs: String,
+    /// Voice activity detection: send silence as comfort noise.
     pub vad: bool,
+    /// Echo cancellation (turns stereo codecs mono).
     pub ec: bool,
     pub opus_stereo: bool,
+    /// Answer incoming calls with our codec order.
+    pub force_codec: bool,
     /// Write the full SIP log (holds numbers and addresses).
     pub enable_log: bool,
 }
@@ -70,6 +74,7 @@ impl Default for SipSettings {
             vad: false,
             ec: true,
             opus_stereo: false,
+            force_codec: false,
             enable_log: false,
         }
     }

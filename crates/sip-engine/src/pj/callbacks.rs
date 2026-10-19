@@ -26,9 +26,12 @@ pub struct CallOptions {
     pub dtmf_method: DtmfMethod,
     /// Play DTMF digits locally.
     pub local_dtmf: bool,
+    /// Answer incoming calls with our codec order rather than the
+    /// caller's.
+    pub force_codec: bool,
 }
 
-static OPTIONS: RwLock<CallOptions> = RwLock::new(CallOptions { dtmf_method: DtmfMethod::Auto, local_dtmf: true });
+static OPTIONS: RwLock<CallOptions> = RwLock::new(CallOptions { dtmf_method: DtmfMethod::Auto, local_dtmf: true, force_codec: false });
 
 pub fn set_engine_tx(tx: Option<std::sync::mpsc::Sender<Message>>) {
     *ENGINE_TX.lock().unwrap_or_else(|e| e.into_inner()) = tx;
@@ -140,6 +143,10 @@ fn reg_state(info: &pjsua_reg_info, param: &pjsip_regc_cbparam) -> RegState {
 pub unsafe extern "C" fn on_incoming_call(_acc_id: pjsua_acc_id, call_id: pjsua_call_id, rdata: *mut pjsip_rx_data) {
     guard(|| {
         calls::capture_headers(call_id, rdata);
+        // SAFETY: rdata is the incoming INVITE, valid during the callback.
+        if options().force_codec && unsafe { shim::jf_prefer_local_codec_order(rdata) } != PJ_SUCCESS {
+            log::warn!("cannot prefer our codec order for call {call_id}");
+        }
         if let Some(info) = calls::call_info(call_id) {
             emit(Event::IncomingCall(info));
         }

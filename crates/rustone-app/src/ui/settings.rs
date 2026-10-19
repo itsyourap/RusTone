@@ -169,6 +169,9 @@ fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
         if available.is_empty() {
             ui.label(egui::RichText::new("The full codec list appears once the SIP engine has started.").size(12.0).color(p.dim));
         }
+        ui.add_space(4.0);
+        ui.separator();
+        processing(ui, app, p, &available);
         if app.sip.calls.live_count() > 0 {
             ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
         }
@@ -243,4 +246,33 @@ fn device_picker(ui: &mut Ui, id: &str, value: &mut String, devices: &[sip_engin
     });
     ui.ctx().accesskit_node_builder(combo.response.id, |node| node.set_label(id));
     changed
+}
+
+/// EC, VAD, Opus stereo and forceCodec (the checkboxes under the
+/// codec lists). All but forceCodec restart the engine once no call is live.
+fn processing(ui: &mut Ui, app: &mut App, p: &Palette, available: &[String]) {
+    let sip = &mut app.settings.sip;
+    let mut changed = false;
+    let has_opus = available.iter().any(|c| c.to_ascii_lowercase().starts_with("opus/"));
+    let mut rows = vec![
+        (&mut sip.ec, "Echo cancellation", Some("Stops the other side hearing themselves through your speaker")),
+        (&mut sip.vad, "Silence suppression", Some("Sends less data while nobody talks (VAD)")),
+        (&mut sip.force_codec, "Use my codec order for incoming calls", Some("Otherwise the caller's preferred codec wins")),
+    ];
+    if has_opus {
+        rows.push((&mut sip.opus_stereo, "Opus in stereo", Some("Turns echo cancellation off")));
+    }
+    for (value, title, description) in rows {
+        setting_row(ui, p, title, description, |ui| {
+            changed |= widgets::toggle(ui, p, value, title).changed();
+        });
+    }
+    // Saving warns the same way.
+    let stereo = sip.audio_codecs.split_whitespace().any(|c| !c.to_ascii_lowercase().starts_with("opus/") && c.ends_with("/2"));
+    if stereo && sip.ec {
+        ui.label(egui::RichText::new("Echo cancellation turns the stereo codecs mono.").size(12.0).color(p.warning));
+    }
+    if changed {
+        app.mark_settings_dirty();
+    }
 }

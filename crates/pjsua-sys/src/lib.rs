@@ -86,6 +86,10 @@ pub mod shim {
             buf_len: usize,
         ) -> c_int;
 
+        /// Makes the answer to an incoming call's offer follow our codec
+        /// priorities. Call from on_incoming_call.
+        pub fn jf_prefer_local_codec_order(rdata: *mut pjsip_rx_data) -> pj_status_t;
+
         /// Registers the SIP message tap module (after pjsua_init).
         pub fn jf_msg_tap_install(cb: MsgCallback) -> pj_status_t;
         /// Unregisters it (before pjsua_destroy).

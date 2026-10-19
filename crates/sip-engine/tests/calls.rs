@@ -5,7 +5,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use sip_engine::{CallInfo, CallState, Command, Direction, DtmfMethod, Engine, EngineConfig, Event, LocalAccountConfig, MediaState, Sound};
+use sip_engine::{CallInfo, CallOptions, CallState, Command, Direction, DtmfMethod, Engine, EngineConfig, Event, LocalAccountConfig, MediaState, Sound};
 
 fn wait_for(rx: &mpsc::Receiver<Event>, what: &str, mut want: impl FnMut(&Event) -> bool) -> Event {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -70,6 +70,8 @@ fn call_to_self_over_the_local_account() {
     .expect("engine starts");
     wait_for(&rx, "Started", |e| *e == Event::Started);
     engine.send(Command::SetLocalAccount(Some(LocalAccountConfig { username: "rustone-test".into(), ..LocalAccountConfig::default() })));
+    // Exercises forceCodec on a real incoming INVITE.
+    engine.send(Command::SetCallOptions(CallOptions { dtmf_method: DtmfMethod::Auto, local_dtmf: true, force_codec: true }));
 
     engine.send(Command::MakeCall { target: "127.0.0.1:5060".into(), video: false, local: true });
     let incoming = match wait_for(&rx, "IncomingCall", |e| matches!(e, Event::IncomingCall(_))) {

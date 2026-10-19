@@ -65,6 +65,17 @@ int jf_rdata_header(const pjsip_rx_data *rdata, const char *name,
 /* Struct sizes as MSVC sees them, used by tests to check the bindgen
  * layouts against the compiler that built the library.
  */
+/* Force codec: answer an incoming offer with our codec order
+ * instead of the caller's. Call from on_incoming_call. */
+pj_status_t jf_prefer_local_codec_order(pjsip_rx_data *rdata)
+{
+    pjsip_dialog *dlg = pjsip_rdata_get_dlg(rdata);
+    pjsip_inv_session *inv = dlg ? pjsip_dlg_get_inv_session(dlg) : NULL;
+    if (!inv || !inv->neg)
+        return PJ_EINVALIDOP;
+    return pjmedia_sdp_neg_set_prefer_remote_codec_order(inv->neg, PJ_FALSE);
+}
+
 size_t jf_sizeof_pjsua_config(void)           { return sizeof(pjsua_config); }
 size_t jf_sizeof_pjsua_media_config(void)     { return sizeof(pjsua_media_config); }
 size_t jf_sizeof_pjsua_logging_config(void)   { return sizeof(pjsua_logging_config); }
