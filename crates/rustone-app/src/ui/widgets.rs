@@ -311,13 +311,22 @@ pub fn level_slider(ui: &mut Ui, p: &Palette, icons: (Icon, Icon), label: &str, 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             painter.rect_filled(track, CornerRadius::same(3), p.surface);
-            if let Some(level) = meter {
-                let level = level.clamp(0.0, 1.0);
-                let mut bar = track;
-                bar.set_width(track.width() * level);
-                painter.rect_filled(bar, CornerRadius::same(3), if level >= 1.0 { p.danger } else { p.success });
-            }
             let x = track.left() + track.width() * f32::from((*value).min(100)) / 100.0;
+            match meter {
+                // With a meter the track shows the live level...
+                Some(level) => {
+                    let level = level.clamp(0.0, 1.0);
+                    let mut bar = track;
+                    bar.set_width(track.width() * level);
+                    painter.rect_filled(bar, CornerRadius::same(3), if level >= 1.0 { p.danger } else { p.success });
+                }
+                // ...without one it fills up to the value.
+                None => {
+                    let mut bar = track;
+                    bar.set_right(x);
+                    painter.rect_filled(bar, CornerRadius::same(3), if muted { p.dim } else { p.accent });
+                }
+            }
             let t = hover_t(ui, &response);
             let thumb = if muted { p.dim } else { p.text };
             painter.circle_filled(egui::pos2(x, track.center().y), 7.0 + t, thumb);
@@ -354,5 +363,23 @@ mod tests {
         harness.key_press(egui::Key::ArrowRight);
         harness.run();
         assert_eq!(*harness.state(), 30, "arrow keys step by 5");
+    }
+
+    /// Whether a rectangle filled with `color` was painted.
+    fn painted_rect(harness: &egui_kittest::Harness<'_, u8>, color: Color32) -> bool {
+        harness.output().shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == color && r.rect.width() > 1.0))
+    }
+
+    #[test]
+    fn level_slider_colours_the_value_or_the_meter() {
+        let p = Palette::dark();
+        let plain = crate::ui::test_support::harness([300.0, 60.0], 60u8, |ui, value| {
+            level_slider(ui, &Palette::dark(), (Icon::Bell, Icon::BellOff), "Ringtone volume", value, false, None);
+        });
+        assert!(painted_rect(&plain, p.accent), "without a meter the track fills up to the value");
+        let metered = crate::ui::test_support::harness([300.0, 60.0], 60u8, |ui, value| {
+            level_slider(ui, &Palette::dark(), (Icon::Speaker, Icon::SpeakerOff), "Speaker", value, false, Some(0.5));
+        });
+        assert!(painted_rect(&metered, p.success) && !painted_rect(&metered, p.accent), "with a meter the track shows the level");
     }
 }
