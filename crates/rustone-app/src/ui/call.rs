@@ -201,12 +201,16 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
 /// muted unmutes it.
 fn levels(ui: &mut Ui, app: &mut App, p: &Palette, width: f32) {
     let (mic_muted, speaker_muted) = (app.sip.calls.mic_muted, app.sip.calls.speaker_muted);
+    let meters = app.sip.meters();
+    let (speaker_level, mic_level) = (meters.speaker(), meters.mic());
+    // The engine samples every 100 ms.
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     let audio = &mut app.settings.audio;
     let (mut speaker, mut mic) = (audio.volume_output, audio.volume_input);
     let mut out = (widgets::LevelResponse::default(), widgets::LevelResponse::default());
     ui.allocate_ui_with_layout(vec2(width, 72.0), Layout::top_down(Align::Min), |ui| {
-        out.0 = widgets::level_slider(ui, p, (Icon::Speaker, Icon::SpeakerOff), "Speaker", &mut speaker, speaker_muted, None);
-        out.1 = widgets::level_slider(ui, p, (Icon::Mic, Icon::MicOff), "Microphone", &mut mic, mic_muted, None);
+        out.0 = widgets::level_slider(ui, p, (Icon::Speaker, Icon::SpeakerOff), "Speaker", &mut speaker, speaker_muted, Some(speaker_level));
+        out.1 = widgets::level_slider(ui, p, (Icon::Mic, Icon::MicOff), "Microphone", &mut mic, mic_muted, Some(mic_level));
     });
     let (speaker_out, mic_out) = out;
     if speaker_out.changed || mic_out.changed {

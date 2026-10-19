@@ -12,6 +12,7 @@ use std::ffi::{c_int, c_uint};
 use pjsua_sys::*;
 
 pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_options};
+pub use audio::signal_levels;
 pub use calls::set_levels;
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 

@@ -77,3 +77,14 @@ pub fn select(input: i32, output: i32) {
         log::warn!("cannot select sound devices {input}/{output}: {}", super::util::error_text(status));
     }
 }
+
+/// The sound device port's levels: what the microphone sends into the
+/// bridge and what the bridge sends to the speaker (0..=255).
+pub fn signal_levels() -> (u8, u8) {
+    let (mut to_speaker, mut from_mic): (c_uint, c_uint) = (0, 0);
+    // SAFETY: slot 0 is the sound device port; plain query.
+    if unsafe { pjsua_conf_get_signal_level(0, &mut to_speaker, &mut from_mic) } != PJ_SUCCESS {
+        return (0, 0);
+    }
+    (from_mic.min(255) as u8, to_speaker.min(255) as u8)
+}

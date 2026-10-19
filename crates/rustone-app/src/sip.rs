@@ -9,7 +9,7 @@ use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
 use rustone_core::settings::{AudioSettings, Settings, SipSettings, split_list};
 use sip_engine::debug::{DebugFeed, LogSource};
-use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Levels, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Levels, Meters, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
 
 use crate::calls::{CallBook, SoundPaths};
 
@@ -22,6 +22,7 @@ struct Applied {
     options: Option<CallOptions>,
     devices: Option<AudioDevices>,
     levels: Option<Levels>,
+    meters: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +77,7 @@ pub struct Sip {
     pub audio_devices: Vec<AudioDevice>,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
+    meters: Arc<Meters>,
 }
 
 /// What a poll produced that the window should react to.
@@ -102,9 +104,11 @@ impl Sip {
             }
         };
         let feed = engine.as_ref().map_or_else(|| Arc::new(DebugFeed::default()), Engine::debug_feed);
+        let meters = engine.as_ref().map_or_else(|| Arc::new(Meters::default()), Engine::meters);
         let _ = APP_LOG_FEED.set(feed.clone());
         let mut sip = Self {
             feed,
+            meters,
             engine,
             events,
             applied: Applied { config: Some(config), ..Applied::default() },
@@ -149,6 +153,12 @@ impl Sip {
             engine.send(Command::SetLevels(levels));
             self.applied.levels = Some(levels);
         }
+        // The VU meter only matters while a call is shown.
+        let meters = self.calls.live_count() > 0;
+        if self.applied.meters != Some(meters) {
+            engine.send(Command::SetMeters(meters));
+            self.applied.meters = Some(meters);
+        }
         self.calls.ring_level = f32::from(settings.audio.volume_ring.min(100)) / 100.0;
         let local = local_config(&settings.local_account);
         if self.applied.local.as_ref() != Some(&local) {
@@ -161,6 +171,11 @@ impl Sip {
         if let Some(engine) = &self.engine {
             engine.send(command);
         }
+    }
+
+    /// Live microphone and speaker levels.
+    pub fn meters(&self) -> &Meters {
+        &self.meters
     }
 
     /// The debug window's data.

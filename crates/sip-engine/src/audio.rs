@@ -2,6 +2,8 @@
 //! name), and the rules for resolving one
 //! to the other.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 /// A sound device pjsua can open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioDevice {
@@ -111,9 +113,44 @@ impl Levels {
     }
 }
 
+/// Live signal levels of the sound device, updated
+/// every 100 ms by the engine while meters are on. Raw pjmedia levels,
+/// 0..=255 (µ-law scaled), after mute and level adjustment.
+#[derive(Debug, Default)]
+pub struct Meters {
+    mic: AtomicU8,
+    speaker: AtomicU8,
+}
+
+impl Meters {
+    pub(crate) fn set(&self, mic: u8, speaker: u8) {
+        self.mic.store(mic, Ordering::Relaxed);
+        self.speaker.store(speaker, Ordering::Relaxed);
+    }
+
+    /// Microphone level, 0..=1 (full at 95).
+    pub fn mic(&self) -> f32 {
+        (f32::from(self.mic.load(Ordering::Relaxed)) / 95.0).min(1.0)
+    }
+
+    /// Speaker level, 0..=1 (full at 115).
+    pub fn speaker(&self) -> f32 {
+        (f32::from(self.speaker.load(Ordering::Relaxed)) / 115.0).min(1.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meters_scale() {
+        let m = Meters::default();
+        m.set(19, 23);
+        assert!((m.mic() - 0.2).abs() < 1e-6 && (m.speaker() - 0.2).abs() < 1e-6);
+        m.set(200, 255);
+        assert_eq!((m.mic(), m.speaker()), (1.0, 1.0));
+    }
 
     #[test]
     fn levels_map_to_device_and_gain() {

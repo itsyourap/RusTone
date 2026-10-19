@@ -22,7 +22,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub use audio::{AudioDevice, AudioDevices, Levels};
+pub use audio::{AudioDevice, AudioDevices, Levels, Meters};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
@@ -70,6 +70,9 @@ pub enum Command {
     Transfer { call: CallId, target: String },
     /// Attended transfer: join `call`'s party with `with`'s.
     AttendedTransfer { call: CallId, with: CallId },
+    /// Sample the sound device's signal levels into [`Engine::meters`]
+    /// every 100 ms (while a call is shown).
+    SetMeters(bool),
     /// Speaker and microphone levels; applies without a restart.
     SetLevels(Levels),
     /// Use these sound devices (by name); applies without a restart.
@@ -115,6 +118,7 @@ pub struct Engine {
     tx: Sender<Message>,
     thread: Option<JoinHandle<()>>,
     debug: Arc<debug::DebugFeed>,
+    meters: Arc<Meters>,
 }
 
 impl Engine {
@@ -126,25 +130,32 @@ impl Engine {
         }
         let sink: Sink = Arc::new(sink);
         let feed = Arc::new(debug::DebugFeed::default());
+        let meters = Arc::new(Meters::default());
+        let run_meters = meters.clone();
         pj::debug::set_feed(Some(feed.clone()));
         let (tx, rx) = mpsc::channel();
         let engine_tx = tx.clone();
         let thread = std::thread::Builder::new()
             .name("sip-engine".into())
             .spawn(move || {
-                run(config, sink, rx, engine_tx);
+                run(config, sink, rx, engine_tx, run_meters);
                 RUNNING.store(false, Ordering::SeqCst);
             })
             .map_err(|e| {
                 RUNNING.store(false, Ordering::SeqCst);
                 SpawnError::Thread(e)
             })?;
-        Ok(Self { tx, thread: Some(thread), debug: feed })
+        Ok(Self { tx, thread: Some(thread), debug: feed, meters })
     }
 
     /// The debug window's data (SIP messages, logs, streams, audio).
     pub fn debug_feed(&self) -> Arc<debug::DebugFeed> {
         self.debug.clone()
+    }
+
+    /// Live microphone and speaker levels (see [`Command::SetMeters`]).
+    pub fn meters(&self) -> Arc<Meters> {
+        self.meters.clone()
     }
 
     pub fn send(&self, command: Command) {
@@ -169,8 +180,10 @@ impl Drop for Engine {
 const DEVICE_SETTLE: Duration = Duration::from_millis(1500);
 /// How often stream statistics are sampled while debugging.
 const STATS_INTERVAL: Duration = Duration::from_secs(1);
+/// The VU meter timer.
+const METER_INTERVAL: Duration = Duration::from_millis(100);
 
-fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>) {
+fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>, meters: Arc<Meters>) {
     pj::install_sink(sink.clone());
     #[cfg(windows)]
     let _watcher = {
@@ -190,11 +203,13 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut debug_on = false;
     let mut next_stats = Instant::now();
     let mut devices_due: Option<Instant> = None;
+    let mut meters_on = false;
+    let mut next_meter = Instant::now();
 
     loop {
         // Wake for the next timer: device refresh, or (while debugging)
         // sampling stream statistics.
-        let deadline = [devices_due, debug_on.then_some(next_stats)].into_iter().flatten().min();
+        let deadline = [devices_due, debug_on.then_some(next_stats), meters_on.then_some(next_meter)].into_iter().flatten().min();
         let received = match deadline {
             None => rx.recv(),
             Some(deadline) => match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -208,6 +223,11 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                             s.refresh_devices();
                             sink(Event::AudioDevices(s.audio_devices().to_vec()));
                         }
+                    }
+                    if meters_on && next_meter <= now {
+                        next_meter = now + METER_INTERVAL;
+                        let (mic, speaker) = if session.is_some() { pj::signal_levels() } else { (0, 0) };
+                        meters.set(mic, speaker);
                     }
                     if debug_on && next_stats <= now {
                         next_stats = now + STATS_INTERVAL;
@@ -282,6 +302,13 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetMeters(on) => {
+                meters_on = on;
+                next_meter = Instant::now();
+                if !on {
+                    meters.set(0, 0);
+                }
+            }
             Command::SetLevels(levels) => pj::set_levels(levels, session.is_some()),
             Command::SetAudioDevices(new) => {
                 devices = new;
@@ -348,6 +375,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::SetCallOptions(_)
         | Command::SetAudioDevices(_)
         | Command::SetLevels(_)
+        | Command::SetMeters(_)
         | Command::SetDebug(_) => {}
     }
 }

@@ -38,7 +38,17 @@ fn calls_all(rx: &mpsc::Receiver<Event>, what: &str, conditions: &[&dyn Fn(&Call
 
 /// A 0.2 s 16 kHz mono silent WAV.
 fn silent_wav() -> std::path::PathBuf {
-    let samples = 3200u32;
+    wav("silent", &[0; 3200])
+}
+
+/// A 0.2 s 16 kHz mono 1 kHz tone at half scale.
+fn tone_wav() -> std::path::PathBuf {
+    let samples: Vec<i16> = (0..3200).map(|i| (16000.0 * (std::f32::consts::TAU * 1000.0 * i as f32 / 16000.0).sin()) as i16).collect();
+    wav("tone", &samples)
+}
+
+fn wav(name: &str, pcm: &[i16]) -> std::path::PathBuf {
+    let samples = pcm.len() as u32;
     let mut b = Vec::new();
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + samples * 2).to_le_bytes());
@@ -54,8 +64,10 @@ fn silent_wav() -> std::path::PathBuf {
     }
     b.extend_from_slice(b"data");
     b.extend_from_slice(&(samples * 2).to_le_bytes());
-    b.resize(b.len() + samples as usize * 2, 0);
-    let path = std::env::temp_dir().join(format!("sip-engine-test-{}.wav", std::process::id()));
+    for v in pcm {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    let path = std::env::temp_dir().join(format!("sip-engine-test-{name}-{}.wav", std::process::id()));
     std::fs::write(&path, b).unwrap();
     path
 }
@@ -136,6 +148,20 @@ fn call_to_self_over_the_local_account() {
     engine.send(Command::SetMute { mic: true, speaker: false });
     engine.send(Command::SetMute { mic: false, speaker: false });
     std::thread::sleep(Duration::from_millis(500));
+
+    // The VU meter sees what goes to the speaker (the null device here).
+    engine.send(Command::SetMeters(true));
+    engine.send(Command::PlaySound(Sound { path: tone_wav(), looping: true, level: 1.0, ring: false }));
+    let meters = engine.meters();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while meters.speaker() == 0.0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(meters.speaker() > 0.0, "the speaker meter moves while a tone plays");
+    engine.send(Command::StopSound);
+    engine.send(Command::SetMeters(false));
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(meters.speaker(), 0.0, "meters off reads zero");
 
     engine.send(Command::Hangup(out.id));
     calls_all(&rx, "both legs disconnected", &[
