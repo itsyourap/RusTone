@@ -7,6 +7,7 @@
 //!
 //! pjsua is a process-wide singleton, so only one [`Engine`] can exist.
 
+mod audio;
 mod call;
 mod config;
 pub mod debug;
@@ -18,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
+pub use audio::{AudioDevice, AudioDevices};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
@@ -65,6 +67,8 @@ pub enum Command {
     Transfer { call: CallId, target: String },
     /// Attended transfer: join `call`'s party with `with`'s.
     AttendedTransfer { call: CallId, with: CallId },
+    /// Use these sound devices (by name); applies without a restart.
+    SetAudioDevices(AudioDevices),
     PlaySound(Sound),
     StopSound,
     /// Collect stream statistics and audio for the debug window, and raise
@@ -159,6 +163,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     pj::set_engine_tx(Some(tx));
     let mut account: Option<AccountConfig> = None;
     let mut local: Option<LocalAccountConfig> = None;
+    let mut devices = AudioDevices::default();
     let mut session = start(&config, &sink);
     let mut suspended = false;
     let mut debug_on = false;
@@ -194,6 +199,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 config = new_config;
                 stop(&mut session, &sink);
                 session = start(&config, &sink);
+                set_devices(&mut session, &devices);
                 add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 if debug_on && session.is_some() {
                     pj::debug::apply(true);
@@ -231,11 +237,16 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
             Command::Resume => {
                 if suspended && session.is_none() {
                     session = start(&config, &sink);
+                    set_devices(&mut session, &devices);
                     add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 }
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetAudioDevices(new) => {
+                devices = new;
+                set_devices(&mut session, &devices);
+            }
             Command::SetDebug(on) => {
                 debug_on = on;
                 pj::debug::feed_enabled(on);
@@ -294,6 +305,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::Suspend
         | Command::Resume
         | Command::SetCallOptions(_)
+        | Command::SetAudioDevices(_)
         | Command::SetDebug(_) => {}
     }
 }
@@ -303,6 +315,7 @@ fn start(config: &EngineConfig, sink: &Sink) -> Option<pj::Session> {
         Ok(session) => {
             sink(Event::Started);
             sink(Event::Codecs(session.codecs()));
+            sink(Event::AudioDevices(session.audio_devices().to_vec()));
             Some(session)
         }
         Err(e) => {
@@ -318,6 +331,12 @@ fn stop(session: &mut Option<pj::Session>, sink: &Sink) {
         s.stop();
         sink(Event::Stopped);
         sink(Event::Registration(RegState::Unregistered));
+    }
+}
+
+fn set_devices(session: &mut Option<pj::Session>, devices: &AudioDevices) {
+    if let Some(s) = session {
+        s.set_audio_devices(devices);
     }
 }
 

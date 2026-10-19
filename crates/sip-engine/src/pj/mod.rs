@@ -1,6 +1,7 @@
 //! One pjsua lifetime: create, configure, run, destroy. Every function here
 //! runs on the engine thread.
 
+mod audio;
 mod callbacks;
 mod calls;
 pub mod debug;
@@ -13,6 +14,7 @@ use pjsua_sys::*;
 pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_options};
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
+use crate::audio::{AudioDevice, AudioDevices, DeviceIds};
 use crate::call::{CallId, CodecInfo, DtmfMethod, Sound};
 use crate::config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 use crate::{Event, RegState, Sink};
@@ -35,6 +37,12 @@ pub struct Session {
     account_config: Option<AccountConfig>,
     local_account: pjsua_acc_id,
     player: Option<calls::Player>,
+    /// No sound device at all (tests, headless use).
+    null_audio: bool,
+    /// Sound devices pjsua sees, the ones wanted (by name), and their indexes.
+    devices: Vec<AudioDevice>,
+    wanted_devices: AudioDevices,
+    device_ids: DeviceIds,
     stopped: bool,
 }
 
@@ -54,6 +62,10 @@ impl Session {
             account_config: None,
             local_account: PJSUA_INVALID_ID,
             player: None,
+            null_audio: cfg.null_audio,
+            devices: Vec::new(),
+            wanted_devices: AudioDevices::default(),
+            device_ids: DeviceIds::default(),
             stopped: false,
         };
         match session.init(cfg) {
@@ -130,6 +142,10 @@ impl Session {
             check(unsafe { pjsua_set_null_snd_dev() }, "selecting no sound device")?;
         }
         self.set_audio_codecs(&cfg.audio_codecs);
+        self.devices = audio::devices();
+        for d in &self.devices {
+            log::info!("sound device {}: {} ({}, {} in, {} out)", d.index, d.name, d.driver, d.inputs, d.outputs);
+        }
         log::info!("SIP engine started");
         Ok(())
     }
@@ -386,6 +402,44 @@ impl Session {
     }
 
     // -----------------------------------------------------------------------
+    // Sound devices
+
+    /// The sound devices pjsua sees.
+    pub fn audio_devices(&self) -> &[AudioDevice] {
+        &self.devices
+    }
+
+    /// Picks the devices to use. Applies at once when a device is open:
+    /// the ring device stays in use if it was, otherwise the speaker.
+    pub fn set_audio_devices(&mut self, wanted: &AudioDevices) {
+        let old = self.device_ids;
+        self.wanted_devices = wanted.clone();
+        self.device_ids = DeviceIds::resolve(wanted, &self.devices);
+        log::info!("sound devices wanted {wanted:?} -> {:?}", self.device_ids);
+        if self.null_audio || self.device_ids == old {
+            return;
+        }
+        match audio::current() {
+            Some((_, playback)) => {
+                let ringing = !calls::any_call_audio() && playback == old.ring && old.ring != old.output;
+                let output = if ringing { self.device_ids.ring } else { self.device_ids.output };
+                audio::open(self.device_ids.input, output, true);
+            }
+            // Whatever opens the device next (early media, the debug
+            // window's taps) gets these.
+            None => audio::select(self.device_ids.input, self.device_ids.output),
+        }
+    }
+
+    /// Switches to the call devices (before calling,
+    /// answering and local tones).
+    fn use_call_devices(&self) {
+        if !self.null_audio {
+            audio::open(self.device_ids.input, self.device_ids.output, false);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Calls
 
     /// The URI to call for `target`: SIP URIs as given; numbers through the
@@ -415,6 +469,7 @@ impl Session {
             return Err(if local { "the local account is off".into() } else { "no account to call from".into() });
         }
         let uri = self.target_uri(target, local)?;
+        self.use_call_devices();
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
         // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
@@ -430,6 +485,9 @@ impl Session {
     /// Sends a provisional or final response to an incoming call (180, 200,
     /// 486...). 200 answers with audio, plus video when asked.
     pub fn answer(&self, call: CallId, code: u16, video: bool) -> Result<(), String> {
+        if code == 200 {
+            self.use_call_devices();
+        }
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
         // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
@@ -486,6 +544,7 @@ impl Session {
     /// Key-press feedback on the local speaker (dialer keypad).
     pub fn play_local_digits(&self, digits: &str) {
         if callbacks::options().local_dtmf {
+            self.use_call_devices();
             calls::play_digits(ToneKey::Local, digits);
         }
     }
@@ -513,6 +572,11 @@ impl Session {
 
     pub fn play_sound(&mut self, sound: &Sound) -> Result<(), String> {
         self.stop_sound();
+        // The ring device only while no call has audio.
+        if !self.null_audio && !calls::any_call_audio() {
+            let output = if sound.ring { self.device_ids.ring } else { self.device_ids.output };
+            audio::open(self.device_ids.input, output, false);
+        }
         self.player = Some(calls::Player::start(&sound.path, sound.looping, sound.level, callbacks::on_player_eof)?);
         Ok(())
     }

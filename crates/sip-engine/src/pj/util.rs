@@ -54,6 +54,12 @@ pub fn pj_to_string(s: &pj_str_t) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Copies a fixed-size, NUL-terminated C char array (lossy UTF-8).
+pub fn cstr_to_string(chars: &[c_char]) -> String {
+    let bytes: Vec<u8> = chars.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 /// Lends the account's info to `f`. `pjsua_acc_info` keeps its strings in an
 /// internal buffer, so it must not be moved out.
 pub fn with_acc_info<R>(acc_id: pjsua_acc_id, f: impl FnOnce(&pjsua_acc_info) -> R) -> Option<R> {

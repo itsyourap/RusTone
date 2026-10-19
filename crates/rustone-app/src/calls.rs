@@ -344,7 +344,9 @@ impl CallBook {
 
     fn play(&mut self, kind: Playing, path: &std::path::Path, looping: bool, level: f32) -> Command {
         self.playing = Some(kind);
-        Command::PlaySound(Sound { path: path.to_path_buf(), looping, level })
+        // Only the ringtone goes to the ring device; the rest are call sounds.
+        let ring = kind == Playing::Ringtone;
+        Command::PlaySound(Sound { path: path.to_path_buf(), looping, level, ring })
     }
 
     fn stop(&mut self) -> Command {

@@ -97,6 +97,9 @@ pub struct Sound {
     pub looping: bool,
     /// 0..=1 (in-call sounds play at 0.4).
     pub level: f32,
+    /// Play on the ring device when no call has audio (the ringtone);
+    /// otherwise on the speaker.
+    pub ring: bool,
 }
 
 /// `"Name" <sip:user@host:port;params>` → `user@host:port` (lowercase).

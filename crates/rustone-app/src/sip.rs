@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
-use rustone_core::settings::{Settings, SipSettings, split_list};
+use rustone_core::settings::{AudioSettings, Settings, SipSettings, split_list};
 use sip_engine::debug::{DebugFeed, LogSource};
-use sip_engine::{AccountConfig, CallOptions, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
 
 use crate::calls::{CallBook, SoundPaths};
 
@@ -20,6 +20,7 @@ struct Applied {
     account: Option<Option<AccountConfig>>,
     local: Option<Option<LocalAccountConfig>>,
     options: Option<CallOptions>,
+    devices: Option<AudioDevices>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,8 @@ pub struct Sip {
     pub reg: RegState,
     /// Audio codecs the engine has (ids, preferred first), with priorities.
     pub codecs: Vec<sip_engine::CodecInfo>,
+    /// Sound devices the engine sees.
+    pub audio_devices: Vec<AudioDevice>,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
 }
@@ -108,6 +111,7 @@ impl Sip {
             engine_state,
             reg: RegState::Unregistered,
             codecs: Vec::new(),
+            audio_devices: Vec::new(),
             calls: CallBook::new(sounds),
         };
         sip.sync(settings);
@@ -133,6 +137,11 @@ impl Sip {
         if self.applied.options != Some(options) {
             engine.send(Command::SetCallOptions(options));
             self.applied.options = Some(options);
+        }
+        let devices = audio_devices(&settings.audio);
+        if self.applied.devices.as_ref() != Some(&devices) {
+            engine.send(Command::SetAudioDevices(devices.clone()));
+            self.applied.devices = Some(devices);
         }
         let local = local_config(&settings.local_account);
         if self.applied.local.as_ref() != Some(&local) {
@@ -170,6 +179,7 @@ impl Sip {
             match event {
                 Event::Started => self.engine_state = EngineState::Running,
                 Event::Codecs(codecs) => self.codecs = codecs,
+                Event::AudioDevices(devices) => self.audio_devices = devices,
                 Event::Stopped => self.engine_state = EngineState::Stopped,
                 Event::Failed(e) => self.engine_state = EngineState::Failed(e),
                 Event::Registration(state) => {
@@ -308,6 +318,10 @@ fn call_options(settings: &Settings) -> CallOptions {
         },
         local_dtmf: settings.calls.local_dtmf,
     }
+}
+
+fn audio_devices(audio: &AudioSettings) -> AudioDevices {
+    AudioDevices { input: audio.input_device.clone(), output: audio.output_device.clone(), ring: audio.ring_device.clone() }
 }
 
 fn local_config(local: &LocalAccount) -> Option<LocalAccountConfig> {

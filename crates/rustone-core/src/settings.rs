@@ -19,6 +19,7 @@ pub struct Settings {
     pub ui: UiSettings,
     pub sip: SipSettings,
     pub calls: CallSettings,
+    pub audio: AudioSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -72,6 +73,16 @@ impl Default for SipSettings {
             enable_log: false,
         }
     }
+}
+
+/// Sound devices and levels.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioSettings {
+    /// Device names as pjsua reports them; empty for the system default.
+    pub input_device: String,
+    pub output_device: String,
+    pub ring_device: String,
 }
 
 /// How DTMF digits are sent.
@@ -309,6 +320,14 @@ dtmf_method = \"sip-info\"").unwrap().calls;
         assert_eq!(c.dtmf_method, DtmfMethod::SipInfo);
         assert!(c.local_dtmf && c.call_waiting && c.bring_to_front && !c.no_ignore);
         assert_eq!(c.max_concurrent_calls, 0);
+    }
+
+    #[test]
+    fn audio_devices_default_to_the_system() {
+        let a = Settings::from_toml("[audio]
+output_device = \"Speakers (Realtek)\"").unwrap().audio;
+        assert_eq!(a.output_device, "Speakers (Realtek)");
+        assert!(a.input_device.is_empty() && a.ring_device.is_empty());
     }
 
     #[test]

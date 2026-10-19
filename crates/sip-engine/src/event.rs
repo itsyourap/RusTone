@@ -1,5 +1,6 @@
 //! What the engine reports to the application.
 
+use crate::audio::AudioDevice;
 use crate::call::{CallId, CallInfo, CodecInfo};
 
 /// Events are delivered on pjsua's worker threads or the engine thread; the
@@ -10,6 +11,8 @@ pub enum Event {
     Started,
     /// The audio codecs pjsua has, with their priorities (after start).
     Codecs(Vec<CodecInfo>),
+    /// The sound devices pjsua sees (after start and after hot-plug).
+    AudioDevices(Vec<AudioDevice>),
     /// pjsua could not start; the engine waits for a new configuration.
     Failed(String),
     /// pjsua was shut down (suspend, or before a restart).

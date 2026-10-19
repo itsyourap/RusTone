@@ -130,7 +130,7 @@ fn call_to_self_over_the_local_account() {
     wait_for(&rx, "DTMF 5", |e| matches!(e, Event::DtmfReceived { call, digit: '5' } if *call == incoming.id));
 
     // A short sound plays to its end and is cleaned up.
-    engine.send(Command::PlaySound(Sound { path: silent_wav(), looping: false, level: 0.4 }));
+    engine.send(Command::PlaySound(Sound { path: silent_wav(), looping: false, level: 0.4, ring: false }));
     engine.send(Command::SetMute { mic: true, speaker: false });
     engine.send(Command::SetMute { mic: false, speaker: false });
     std::thread::sleep(Duration::from_millis(500));

@@ -178,6 +178,11 @@ pub fn update_media(call_id: CallId) {
     apply_levels();
 }
 
+/// Whether any call's audio is connected to the sound device.
+pub fn any_call_audio() -> bool {
+    call_ids().into_iter().any(|id| call_info(id).is_some_and(|i| matches!(i.media, MediaState::Active | MediaState::RemoteHold)))
+}
+
 pub fn set_mute(mic: bool, speaker: bool) {
     MIC_MUTED.store(mic, Ordering::SeqCst);
     SPEAKER_MUTED.store(speaker, Ordering::SeqCst);

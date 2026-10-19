@@ -18,6 +18,10 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         super::accounts::list(ui, app, p);
         ui.add_space(12.0);
 
+        section_title(ui, p, "Audio devices");
+        audio_devices(ui, app, p);
+        ui.add_space(12.0);
+
         section_title(ui, p, "Audio codecs");
         codecs(ui, app, p);
         ui.add_space(12.0);
@@ -177,4 +181,66 @@ fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
             app.mark_settings_dirty();
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeviceKind {
+    Input,
+    Output,
+}
+
+/// Microphone, speaker and ring device, by name.
+fn audio_devices(ui: &mut Ui, app: &mut App, p: &Palette) {
+    let devices = app.sip.audio_devices.clone();
+    let audio = &mut app.settings.audio;
+    let mut changed = false;
+    card(ui, p, |ui| {
+        for (i, (value, title, description, kind)) in [
+            (&mut audio.input_device, "Microphone", None, DeviceKind::Input),
+            (&mut audio.output_device, "Speaker", Some("Call audio"), DeviceKind::Output),
+            (&mut audio.ring_device, "Ring device", Some("Plays the ringtone while no call is connected"), DeviceKind::Output),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if i > 0 {
+                ui.separator();
+            }
+            setting_stack(ui, p, title, description, |ui| {
+                changed |= device_picker(ui, title, value, &devices, kind);
+            });
+        }
+        if devices.is_empty() {
+            ui.label(egui::RichText::new("The device list appears once the SIP engine has started.").size(12.0).color(p.dim));
+        }
+    });
+    if changed {
+        app.mark_settings_dirty();
+    }
+}
+
+/// A device combo: "System default", then the devices of `kind`. A saved
+/// device that isn't connected stays selected (and is used when it's back).
+fn device_picker(ui: &mut Ui, id: &str, value: &mut String, devices: &[sip_engine::AudioDevice], kind: DeviceKind) -> bool {
+    let fits = |d: &&sip_engine::AudioDevice| match kind {
+        DeviceKind::Input => d.inputs > 0,
+        DeviceKind::Output => d.outputs > 0,
+    };
+    let mut names: Vec<&str> = devices.iter().filter(fits).map(|d| d.name.as_str()).collect();
+    names.dedup();
+    let missing = !value.is_empty() && !names.contains(&value.as_str()) && !devices.is_empty();
+    let selected = match (value.is_empty(), missing) {
+        (true, _) => "System default".to_owned(),
+        (false, true) => format!("{value} (not connected)"),
+        (false, false) => value.clone(),
+    };
+    let mut changed = false;
+    let combo = egui::ComboBox::from_id_salt(("audio-device", id)).width(ui.available_width()).selected_text(selected).truncate().show_ui(ui, |ui| {
+        changed |= ui.selectable_value(value, String::new(), "System default").changed();
+        for name in names {
+            changed |= ui.selectable_value(value, name.to_owned(), name).changed();
+        }
+    });
+    ui.ctx().accesskit_node_builder(combo.response.id, |node| node.set_label(id));
+    changed
 }
