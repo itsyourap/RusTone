@@ -197,6 +197,7 @@ fn audio_devices(ui: &mut Ui, app: &mut App, p: &Palette) {
     let devices = app.sip.audio_devices.clone();
     let audio = &mut app.settings.audio;
     let mut changed = false;
+    let mut preview_ring = false;
     card(ui, p, |ui| {
         for (i, (value, title, description, kind)) in [
             (&mut audio.input_device, "Microphone", None, DeviceKind::Input),
@@ -216,9 +217,30 @@ fn audio_devices(ui: &mut Ui, app: &mut App, p: &Palette) {
         if devices.is_empty() {
             ui.label(egui::RichText::new("The device list appears once the SIP engine has started.").size(12.0).color(p.dim));
         }
+        ui.separator();
+        setting_stack(ui, p, "Ringtone volume", None, |ui| {
+            let level = widgets::level_slider(ui, p, (Icon::Bell, Icon::BellOff), "Ringtone volume", &mut audio.volume_ring, false, None);
+            changed |= level.changed;
+            preview_ring |= level.released;
+        });
+        ui.separator();
+        for (value, title, description) in [
+            (&mut audio.mic_amplification, "Microphone boost", Some("The upper half of the microphone slider amplifies")),
+            (&mut audio.sw_level_adjustment, "Software microphone level", Some("Leave the device's own volume alone")),
+        ] {
+            setting_row(ui, p, title, description, |ui| {
+                changed |= widgets::toggle(ui, p, value, title).changed();
+            });
+        }
     });
     if changed {
         app.mark_settings_dirty();
+    }
+    // Play the ringtone once at the new volume.
+    if preview_ring && !app.sip.calls.has_calls() {
+        let level = f32::from(app.settings.audio.volume_ring.min(100)) / 100.0;
+        let path = app.sip.calls.sounds.ringtone.clone();
+        app.sip.send(sip_engine::Command::PlaySound(sip_engine::Sound { path, looping: false, level, ring: true }));
     }
 }
 

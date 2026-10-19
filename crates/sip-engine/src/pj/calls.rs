@@ -12,6 +12,7 @@ use pjsua_sys::*;
 
 use super::util::{pj_default, pj_to_string};
 pub use crate::call::uri_user_host;
+use crate::audio::Levels;
 use crate::call::{CallId, CallInfo, CallState, Direction, MediaState};
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,7 @@ pub fn call_ids() -> Vec<CallId> {
 
 static MIC_MUTED: AtomicBool = AtomicBool::new(false);
 static SPEAKER_MUTED: AtomicBool = AtomicBool::new(false);
+static LEVELS: Mutex<Levels> = Mutex::new(Levels { speaker: 100, mic: 100, mic_amplification: false, software_mic: false });
 
 fn call_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
     // SAFETY: plain query.
@@ -189,11 +191,33 @@ pub fn set_mute(mic: bool, speaker: bool) {
     apply_levels();
 }
 
-/// Mic mute is the level of the sound device's capture into the bridge;
-/// speaker mute is each call's level towards the sound device.
+/// Sets the slider levels; applied now when `apply` (pjsua running) and
+/// whenever call media changes.
+pub fn set_levels(levels: Levels, apply: bool) {
+    *lock(&LEVELS) = levels;
+    if apply {
+        apply_levels();
+    }
+}
+
+/// The microphone is the level of the sound device's capture into the
+/// bridge (after trying the device's own volume); the speaker is each
+/// call's level towards the sound device. Mute makes either 0.
 fn apply_levels() {
-    let mic = if MIC_MUTED.load(Ordering::SeqCst) { 0.0 } else { 1.0 };
-    let speaker = if SPEAKER_MUTED.load(Ordering::SeqCst) { 0.0 } else { 1.0 };
+    let levels = *lock(&LEVELS);
+    let mic = if MIC_MUTED.load(Ordering::SeqCst) {
+        0.0
+    } else {
+        // Only while a device is open: a kept setting would be applied when
+        // the next device opens, and WMME devices don't support it.
+        let device_took_volume = !levels.software_mic && unsafe { pjsua_snd_is_active() } != 0 && {
+            let volume: c_uint = levels.mic_device_level();
+            // SAFETY: the value outlives the call; pjsua copies it.
+            unsafe { pjsua_snd_set_setting(PJMEDIA_AUD_DEV_CAP_INPUT_VOLUME_SETTING, (&raw const volume).cast(), PJ_TRUE) == PJ_SUCCESS }
+        };
+        levels.mic_gain(device_took_volume)
+    };
+    let speaker = if SPEAKER_MUTED.load(Ordering::SeqCst) { 0.0 } else { levels.speaker_gain() };
     // SAFETY: valid slots of this pjsua instance.
     unsafe {
         pjsua_conf_adjust_rx_level(0, mic);

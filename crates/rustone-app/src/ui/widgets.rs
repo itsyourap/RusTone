@@ -263,3 +263,96 @@ pub fn primary_button(ui: &mut Ui, p: &Palette, text: &str, fill: Color32) -> Re
         .min_size(vec2(0.0, 36.0));
     ui.add(button)
 }
+
+/// What happened to a [`level_slider`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LevelResponse {
+    /// The icon (mute button) was clicked.
+    pub mute_clicked: bool,
+    /// The level changed.
+    pub changed: bool,
+    /// A drag or click on the track just ended.
+    pub released: bool,
+}
+
+/// A 0..=100 level slider with a mute button in front.
+/// `meter` (0..=1) is drawn as a live bar along the
+/// track, red at full scale. Arrow keys step by 5.
+pub fn level_slider(ui: &mut Ui, p: &Palette, icons: (Icon, Icon), label: &str, value: &mut u8, muted: bool, meter: Option<f32>) -> LevelResponse {
+    let mut out = LevelResponse::default();
+    ui.horizontal(|ui| {
+        let (icon, muted_icon) = icons;
+        let mute_label = if muted { format!("Unmute {}", label.to_lowercase()) } else { format!("Mute {}", label.to_lowercase()) };
+        out.mute_clicked = icon_button(ui, p, if muted { muted_icon } else { icon }, if muted { p.danger } else { p.secondary }, &mute_label).clicked();
+
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click_and_drag());
+        let before = *value;
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), f64::from(*value), label));
+        let track = egui::Rect::from_min_max(egui::pos2(rect.left() + 8.0, rect.center().y - 3.0), egui::pos2(rect.right() - 8.0, rect.center().y + 3.0));
+        // Follow the pointer while it's held on the slider.
+        if let Some(pos) = response.interact_pointer_pos().or_else(|| response.hover_pos())
+            && (response.is_pointer_button_down_on() || response.clicked())
+        {
+            *value = (((pos.x - track.left()) / track.width()).clamp(0.0, 1.0) * 100.0).round() as u8;
+        }
+        if response.has_focus() {
+            ui.input(|i| {
+                if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowUp) {
+                    *value = value.saturating_add(5).min(100);
+                }
+                if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowDown) {
+                    *value = value.saturating_sub(5);
+                }
+            });
+        }
+        out.changed = *value != before;
+        out.released = response.drag_stopped() || response.clicked();
+
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            painter.rect_filled(track, CornerRadius::same(3), p.surface);
+            if let Some(level) = meter {
+                let level = level.clamp(0.0, 1.0);
+                let mut bar = track;
+                bar.set_width(track.width() * level);
+                painter.rect_filled(bar, CornerRadius::same(3), if level >= 1.0 { p.danger } else { p.success });
+            }
+            let x = track.left() + track.width() * f32::from((*value).min(100)) / 100.0;
+            let t = hover_t(ui, &response);
+            let thumb = if muted { p.dim } else { p.text };
+            painter.circle_filled(egui::pos2(x, track.center().y), 7.0 + t, thumb);
+            if response.has_focus() {
+                painter.circle_stroke(egui::pos2(x, track.center().y), 10.0, Stroke::new(1.5, p.accent));
+            }
+        }
+        response.on_hover_text(format!("{label}: {value}%"));
+    });
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn level_slider_follows_clicks_and_arrow_keys() {
+        let mut harness = crate::ui::test_support::harness([300.0, 60.0], 50u8, |ui, value| {
+            level_slider(ui, &Palette::dark(), (Icon::Speaker, Icon::SpeakerOff), "Speaker", value, false, Some(0.3));
+        });
+        // The track is inset 8 px at both ends of the slider.
+        let rect = harness.get_by_label("Speaker").rect();
+        let quarter = egui::pos2(rect.left() + 8.0 + (rect.width() - 16.0) * 0.25, rect.center().y);
+        harness.hover_at(quarter);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton { pos: quarter, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            harness.run();
+        }
+        assert_eq!(*harness.state(), 25);
+        harness.get_by_label("Speaker").focus();
+        harness.run();
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run();
+        assert_eq!(*harness.state(), 30, "arrow keys step by 5");
+    }
+}

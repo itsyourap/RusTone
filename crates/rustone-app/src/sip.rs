@@ -9,7 +9,7 @@ use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
 use rustone_core::settings::{AudioSettings, Settings, SipSettings, split_list};
 use sip_engine::debug::{DebugFeed, LogSource};
-use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
+use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Levels, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
 
 use crate::calls::{CallBook, SoundPaths};
 
@@ -21,6 +21,7 @@ struct Applied {
     local: Option<Option<LocalAccountConfig>>,
     options: Option<CallOptions>,
     devices: Option<AudioDevices>,
+    levels: Option<Levels>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +144,12 @@ impl Sip {
             engine.send(Command::SetAudioDevices(devices.clone()));
             self.applied.devices = Some(devices);
         }
+        let levels = levels(&settings.audio);
+        if self.applied.levels != Some(levels) {
+            engine.send(Command::SetLevels(levels));
+            self.applied.levels = Some(levels);
+        }
+        self.calls.ring_level = f32::from(settings.audio.volume_ring.min(100)) / 100.0;
         let local = local_config(&settings.local_account);
         if self.applied.local.as_ref() != Some(&local) {
             engine.send(Command::SetLocalAccount(local.clone()));
@@ -323,6 +330,15 @@ fn call_options(settings: &Settings) -> CallOptions {
 
 fn audio_devices(audio: &AudioSettings) -> AudioDevices {
     AudioDevices { input: audio.input_device.clone(), output: audio.output_device.clone(), ring: audio.ring_device.clone() }
+}
+
+fn levels(audio: &AudioSettings) -> Levels {
+    Levels {
+        speaker: audio.volume_output,
+        mic: audio.volume_input,
+        mic_amplification: audio.mic_amplification,
+        software_mic: audio.sw_level_adjustment,
+    }
 }
 
 fn local_config(local: &LocalAccount) -> Option<LocalAccountConfig> {

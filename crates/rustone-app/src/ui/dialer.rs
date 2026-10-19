@@ -278,23 +278,9 @@ mod tests {
 
     /// The dialer in a test harness, with the app's fonts and icons.
     fn dialer_harness() -> egui_kittest::Harness<'static, DialerState> {
-        let mut ready = false;
-        let mut harness = egui_kittest::Harness::builder().with_size([475.0, 760.0]).build_ui_state(
-            move |ui, state: &mut DialerState| {
-                if !ready {
-                    // The fastframe fonts and icons only exist from the next frame.
-                    ui.ctx().set_fonts(fastframe_fonts::FontSetup::default().definitions());
-                    fastframe_icons::install::<Icon>(ui.ctx());
-                    ui.ctx().request_repaint();
-                    ready = true;
-                    return;
-                }
-                show(ui, &Palette::dark(), state, true);
-            },
-            DialerState::default(),
-        );
-        harness.run();
-        harness
+        crate::ui::test_support::harness([475.0, 760.0], DialerState::default(), |ui, state| {
+            show(ui, &Palette::dark(), state, true);
+        })
     }
 
     #[test]

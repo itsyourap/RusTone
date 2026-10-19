@@ -193,6 +193,33 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
             }
         });
     }
+    ui.add_space(8.0);
+    levels(ui, app, p, width);
+}
+
+/// Speaker and microphone levels: moving one while
+/// muted unmutes it.
+fn levels(ui: &mut Ui, app: &mut App, p: &Palette, width: f32) {
+    let (mic_muted, speaker_muted) = (app.sip.calls.mic_muted, app.sip.calls.speaker_muted);
+    let audio = &mut app.settings.audio;
+    let (mut speaker, mut mic) = (audio.volume_output, audio.volume_input);
+    let mut out = (widgets::LevelResponse::default(), widgets::LevelResponse::default());
+    ui.allocate_ui_with_layout(vec2(width, 72.0), Layout::top_down(Align::Min), |ui| {
+        out.0 = widgets::level_slider(ui, p, (Icon::Speaker, Icon::SpeakerOff), "Speaker", &mut speaker, speaker_muted, None);
+        out.1 = widgets::level_slider(ui, p, (Icon::Mic, Icon::MicOff), "Microphone", &mut mic, mic_muted, None);
+    });
+    let (speaker_out, mic_out) = out;
+    if speaker_out.changed || mic_out.changed {
+        audio.volume_output = speaker;
+        audio.volume_input = mic;
+        app.mark_settings_dirty();
+    }
+    if speaker_out.mute_clicked || (speaker_out.changed && speaker_muted) {
+        app.act(|c| c.toggle_speaker());
+    }
+    if mic_out.mute_clicked || (mic_out.changed && mic_muted) {
+        app.act(|c| c.toggle_mic());
+    }
 }
 
 fn keypad(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, mut sent: String) {

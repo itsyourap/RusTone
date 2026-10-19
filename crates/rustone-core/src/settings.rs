@@ -81,13 +81,36 @@ impl Default for SipSettings {
 }
 
 /// Sound devices and levels.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioSettings {
     /// Device names as pjsua reports them; empty for the system default.
     pub input_device: String,
     pub output_device: String,
     pub ring_device: String,
+    /// Levels 0..=100.
+    pub volume_output: u8,
+    pub volume_input: u8,
+    pub volume_ring: u8,
+    /// Boost the microphone above the middle of its slider.
+    pub mic_amplification: bool,
+    /// Set the microphone level in software only.
+    pub sw_level_adjustment: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            input_device: String::new(),
+            output_device: String::new(),
+            ring_device: String::new(),
+            volume_output: 100,
+            volume_input: 100,
+            volume_ring: 100,
+            mic_amplification: false,
+            sw_level_adjustment: false,
+        }
+    }
 }
 
 /// How DTMF digits are sent.
@@ -333,6 +356,7 @@ dtmf_method = \"sip-info\"").unwrap().calls;
 output_device = \"Speakers (Realtek)\"").unwrap().audio;
         assert_eq!(a.output_device, "Speakers (Realtek)");
         assert!(a.input_device.is_empty() && a.ring_device.is_empty());
+        assert_eq!((a.volume_output, a.volume_input, a.volume_ring), (100, 100, 100));
     }
 
     #[test]

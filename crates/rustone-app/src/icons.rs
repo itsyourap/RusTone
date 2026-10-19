@@ -38,6 +38,8 @@ fastframe_icons::icons! {
         MicOff => "mic-off",
         Speaker => lucide "volume-2",
         SpeakerOff => lucide "volume-x",
+        Bell => "bell",
+        BellOff => "bell-off",
         Pause => lucide "pause",
         Play => lucide "play",
         Transfer => "phone-forwarded",

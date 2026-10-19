@@ -152,11 +152,13 @@ pub struct CallBook {
     /// A message to show briefly (failed call, failed transfer...).
     pub notice: Option<(String, Instant)>,
     pub sounds: SoundPaths,
+    /// Ringtone level, 0..=1.
+    pub ring_level: f32,
 }
 
 impl CallBook {
     pub fn new(sounds: SoundPaths) -> Self {
-        Self { sounds, ..Self::default() }
+        Self { sounds, ring_level: 1.0, ..Self::default() }
     }
 
     /// Calls to show, oldest first.
@@ -244,7 +246,7 @@ impl CallBook {
                 out.commands.push(self.play(Playing::OneShot, &self.sounds.call_waiting.clone(), false, IN_CALL_LEVEL));
             }
         } else {
-            out.commands.push(self.play(Playing::Ringtone, &self.sounds.ringtone.clone(), true, 1.0));
+            out.commands.push(self.play(Playing::Ringtone, &self.sounds.ringtone.clone(), true, self.ring_level));
         }
         self.current = Some(info.id);
         out.show_window = cfg.bring_to_front;

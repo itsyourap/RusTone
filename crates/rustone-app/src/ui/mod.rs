@@ -5,6 +5,8 @@ mod call;
 pub mod debug;
 mod dialer;
 mod settings;
+#[cfg(test)]
+mod test_support;
 mod widgets;
 
 use egui::{Align, Layout, Sense, Ui, Vec2, vec2};

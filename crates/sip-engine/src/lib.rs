@@ -22,7 +22,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub use audio::{AudioDevice, AudioDevices};
+pub use audio::{AudioDevice, AudioDevices, Levels};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
@@ -70,6 +70,8 @@ pub enum Command {
     Transfer { call: CallId, target: String },
     /// Attended transfer: join `call`'s party with `with`'s.
     AttendedTransfer { call: CallId, with: CallId },
+    /// Speaker and microphone levels; applies without a restart.
+    SetLevels(Levels),
     /// Use these sound devices (by name); applies without a restart.
     SetAudioDevices(AudioDevices),
     PlaySound(Sound),
@@ -280,6 +282,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetLevels(levels) => pj::set_levels(levels, session.is_some()),
             Command::SetAudioDevices(new) => {
                 devices = new;
                 set_devices(&mut session, &devices);
@@ -344,6 +347,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::Resume
         | Command::SetCallOptions(_)
         | Command::SetAudioDevices(_)
+        | Command::SetLevels(_)
         | Command::SetDebug(_) => {}
     }
 }
