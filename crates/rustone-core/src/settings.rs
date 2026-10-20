@@ -173,6 +173,8 @@ pub struct CallSettings {
     pub forwarding_number: String,
     /// Seconds of ringing before forwarding; 0 forwards without ringing.
     pub forwarding_delay: u32,
+    /// Hang up answered calls after this many seconds; 0 never.
+    pub auto_hangup: u32,
 }
 
 /// When auto-answer may answer while other calls exist.
@@ -261,6 +263,7 @@ impl Default for CallSettings {
             forwarding: false,
             forwarding_number: String::new(),
             forwarding_delay: 0,
+            auto_hangup: 0,
         }
     }
 }

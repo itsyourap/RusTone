@@ -79,6 +79,9 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     });
             });
             ui.separator();
+            changed |= widgets::number_field(ui, p, "Hang up calls after (0 for never)", &mut calls.auto_hangup, 0..=86_400, " s").changed();
+            ui.add_space(4.0);
+            ui.separator();
             for (value, title, description) in [
                 (&mut calls.dnd, "Do not disturb", Some("Refuse incoming calls. Also under the status pill and in the tray")),
                 (&mut calls.local_dtmf, "Call sounds", Some("Keypad tones, call-waiting beep and hang-up sound")),

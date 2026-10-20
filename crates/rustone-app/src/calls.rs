@@ -397,6 +397,11 @@ impl CallBook {
         call.info = info.clone();
         if info.state == CallState::Confirmed && call.answered.is_none() {
             call.answered = Some(Instant::now().checked_sub(info.connected_for).unwrap_or_else(Instant::now));
+            if cfg.auto_hangup > 0 {
+                // Auto hang-up: BYE with a Warning.
+                let end = Command::End { call: id, code: 200, headers: vec![("Warning".into(), "399 localhost \"Call duration exceeded\"".into())] };
+                out.commands.push(Command::Later { delay: Duration::from_secs(u64::from(cfg.auto_hangup)), command: Box::new(end) });
+            }
         }
 
         // Starting or answering a call holds the others (msip_call_unhold).
@@ -784,6 +789,20 @@ mod tests {
         let cfg = CallSettings { forwarding: true, ..CallSettings::default() };
         let out = b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
         assert_eq!(answers(&out), [180]);
+    }
+
+    #[test]
+    fn auto_hangup_is_scheduled_once_answered() {
+        let cfg = CallSettings { auto_hangup: 60, ..CallSettings::default() };
+        let mut b = book();
+        b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        let mut answered = info(1, Direction::Incoming, CallState::Confirmed, "<sip:100@pbx>");
+        answered.media = MediaState::Active;
+        let out = b.on_event(&Event::Call(answered.clone()), &cfg);
+        let scheduled: Vec<_> = out.commands.iter().filter_map(|c| if let Command::Later { delay, command } = c { Some((*delay, command.as_ref())) } else { None }).collect();
+        assert!(matches!(scheduled.as_slice(), [(d, Command::End { call: 1, code: 200, headers })] if *d == Duration::from_secs(60) && headers[0].1.starts_with("399 ")));
+        // Only once, not on every later update.
+        assert!(!b.on_event(&Event::Call(answered), &cfg).commands.iter().any(|c| matches!(c, Command::Later { .. })));
     }
 
     #[test]
