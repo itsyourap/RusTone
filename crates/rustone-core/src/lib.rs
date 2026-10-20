@@ -7,3 +7,4 @@ pub mod secrets;
 pub mod settings;
 pub mod sounds;
 pub mod store;
+pub mod vcard;

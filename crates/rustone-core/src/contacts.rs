@@ -45,6 +45,15 @@ impl Contact {
         query.split_whitespace().all(|word| haystack.contains(&word.to_lowercase()))
     }
 
+    /// An empty number takes the phone, then
+    /// the mobile; a contact with no number at all is rejected.
+    pub fn prepared(mut self) -> Option<Self> {
+        if self.number.trim().is_empty() {
+            self.number = if !self.phone.trim().is_empty() { self.phone.clone() } else { self.mobile.clone() };
+        }
+        (!self.number.trim().is_empty()).then_some(self)
+    }
+
     /// The numbers a call could dial: number, phone, mobile (non-empty, in that order).
     pub fn numbers(&self) -> impl Iterator<Item = &str> {
         [&self.number, &self.phone, &self.mobile].into_iter().map(|s| s.trim()).filter(|s| !s.is_empty())
@@ -75,5 +84,12 @@ mod tests {
         assert!(!c.matches("ada babbage"));
         assert!(c.matches(""));
         assert_eq!(c.numbers().collect::<Vec<_>>(), ["1002", "+91 98765"]);
+    }
+
+    #[test]
+    fn prepare_needs_a_number() {
+        let c = Contact { name: "Ada".into(), mobile: "98765".into(), ..Contact::default() };
+        assert_eq!(c.prepared().unwrap().number, "98765");
+        assert!(Contact { name: "Nobody".into(), ..Contact::default() }.prepared().is_none());
     }
 }
