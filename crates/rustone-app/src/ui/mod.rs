@@ -148,7 +148,9 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (logo, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
         Icon::Phone.image(p.accent, 18.0).paint_at(ui, logo);
         ui.label(egui::RichText::new("RusTone").font(Weight::SemiBold.font_id(16.0)).color(p.text));
-        status_chip(ui, p, &app.status(), app.settings.active());
+        if let Some(copied) = status_chip(ui, p, &app.status(), app.settings.active()) {
+            app.notify(format!("Copied {copied}"));
+        }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
@@ -170,8 +172,9 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
 }
 
 /// Registration status as a small pill; the account, its number, its SIP
-/// address and any error on hover.
-fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>) {
+/// address and any error on hover. Right-click copies the number or the
+/// address; returns what was copied.
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>) -> Option<String> {
     let (dot, text) = match status {
         Status::Online | Status::Ready => (p.success, p.secondary),
         Status::Starting | Status::Connecting => (p.warning, p.secondary),
@@ -183,7 +186,8 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     // Leave room for the settings button; show only the dot when narrow.
     let show_text = ui.available_width() > galley.size().x + 90.0;
     let width = if show_text { galley.size().x + 26.0 } else { 20.0 };
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let painter = ui.painter();
     painter.rect_filled(rect, egui::CornerRadius::same(11), p.surface);
     let pulse = matches!(status, Status::Starting | Status::Connecting);
@@ -198,7 +202,22 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
         painter.galley(egui::pos2(rect.left() + 19.0, rect.center().y - galley.size().y / 2.0), galley, text);
     }
     let hover = status_hover(status, account);
-    response.on_hover_text(hover);
+    let response = response.on_hover_text(hover);
+    let mut copied = None;
+    if let Some(account) = account {
+        response.context_menu(|ui| {
+            widgets::menu(ui, |ui| {
+                for (label, value) in [("Copy phone number", account.number().to_owned()), ("Copy full SIP URI", account.sip_uri())] {
+                    if ui.add_enabled(!value.is_empty(), egui::Button::new(label)).clicked() {
+                        ui.ctx().copy_text(value.clone());
+                        copied = Some(value);
+                        ui.close();
+                    }
+                }
+            });
+        });
+    }
+    copied
 }
 
 /// The missed-call count on the Calls tab.
@@ -287,5 +306,23 @@ mod tests {
             "Home · Error\n+910000000000\nsip:+910000000000@sip.example.com\n403 Forbidden"
         );
         assert_eq!(status_hover(&Status::NoAccount, None), "Add an account in Settings");
+    }
+
+    #[test]
+    fn right_click_copies_the_number_or_address() {
+        use egui_kittest::kittest::Queryable;
+        for (item, expected) in [("Copy phone number", "+910000000000"), ("Copy full SIP URI", "sip:+910000000000@sip.example.com")] {
+            let mut harness = test_support::harness([300.0, 160.0], None::<String>, |ui, copied| {
+                let home = Account { label: "Home".into(), username: "+910000000000@sip.example.com".into(), ..Account::default() };
+                if let Some(c) = status_chip(ui, &Palette::dark(), &Status::Online, Some(&home)) {
+                    *copied = Some(c);
+                }
+            });
+            harness.get_by_label("Online").click_secondary();
+            harness.run_steps(2);
+            harness.get_by_label(item).click();
+            harness.run_steps(2);
+            assert_eq!(harness.state().as_deref(), Some(expected));
+        }
     }
 }
