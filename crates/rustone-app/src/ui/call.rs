@@ -1,7 +1,7 @@
 //! The call screen: the current call, its controls, the in-call keypad and
 //! transfer, and the other calls.
 
-use egui::{Align, Layout, Sense, Ui, Vec2, vec2};
+use egui::{Align, Layout, Rect, Sense, Ui, Vec2, vec2};
 use fastframe_fonts::Weight;
 use sip_engine::{CallId, CallState, MediaState};
 
@@ -33,7 +33,27 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
 
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| ui.with_layout(Layout::top_down(Align::Center), |ui| {
         ui.add_space(if compact { 4.0 } else { 12.0 });
-        party_header(ui, p, &call, &caller(app, &call), compact);
+        // A video call shows its video where the avatar would be.
+        if call.info.video && call.ended.is_none() && !compact {
+            let width = ui.available_width();
+            let (rect, _) = ui.allocate_exact_size(vec2(width, (width * 9.0 / 16.0).min(260.0)), Sense::hover());
+            let frames = app.sip.video();
+            if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call.id(), !call.info.camera_off) {
+                video_action(ui, app, call.id(), action);
+            }
+            ui.add_space(8.0);
+        }
+        let shows_video = call.info.video && call.ended.is_none();
+        party_header(ui, p, &call, &caller(app, &call), compact || shows_video);
+        // Video can be added to an answered audio call.
+        let can_add_video = app.settings.features.video
+            && !call.info.video
+            && call.info.state == CallState::Confirmed
+            && call.info.media == MediaState::Active
+            && call.ended.is_none();
+        if can_add_video && ui.add(egui::Button::new(egui::RichText::new("Turn on video").size(12.5))).clicked() {
+            app.sip.send(sip_engine::Command::AddVideo(call.id()));
+        }
         ui.add_space(if compact { 8.0 } else { 16.0 });
 
         if call.ended.is_some() {
@@ -54,6 +74,45 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
         ui.add_space(8.0);
     }));
+}
+
+/// Acts on the video's camera and full-screen buttons.
+fn video_action(ui: &Ui, app: &mut App, call: CallId, action: super::video::VideoAction) {
+    match action {
+        super::video::VideoAction::Camera(on) => app.act(|c| c.set_camera(call, on)),
+        super::video::VideoAction::Fullscreen(on) => {
+            app.ui.video.fullscreen = on;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+        }
+    }
+}
+
+/// Full-screen video of the current call. Returns false (and leaves full
+/// screen) when there's no video to show.
+pub fn fullscreen(ui: &mut Ui, app: &mut App, p: &Palette) -> bool {
+    let call = app.sip.calls.current_call().filter(|c| c.info.video && c.ended.is_none()).cloned();
+    let Some(call) = call else {
+        app.ui.video.fullscreen = false;
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        return false;
+    };
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        video_action(ui, app, call.id(), super::video::VideoAction::Fullscreen(false));
+        return false;
+    }
+    egui::CentralPanel::default().frame(egui::Frame::new().fill(egui::Color32::BLACK)).show(ui, |ui| {
+        let rect = ui.max_rect();
+        let frames = app.sip.video();
+        if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call.id(), !call.info.camera_off) {
+            video_action(ui, app, call.id(), action);
+        }
+        // Hang up from full screen too.
+        let hangup = Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - 48.0), Vec2::splat(60.0));
+        if ui.put(hangup, |ui: &mut Ui| widgets::round_icon_button(ui, 60.0, p.danger, Icon::PhoneOff, p.on_accent, "Hang up")).clicked() {
+            app.act(|c| c.hangup(call.id()));
+        }
+    });
+    true
 }
 
 /// A slim bar on other pages leading back to the call.

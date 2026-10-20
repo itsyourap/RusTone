@@ -373,13 +373,17 @@ fn video(ui: &mut Ui, app: &mut App, p: &Palette) {
         changed |= widgets::number_field(ui, p, "Bitrate (kbit/s)", &mut app.settings.video.bitrate_kbps, 0..=8000, " kbit/s").changed();
         ui.label(egui::RichText::new("0 keeps H.264's default (256 kbit/s).").size(12.0).color(p.dim));
         ui.separator();
-        setting_row(ui, p, "Preview", Some("Show the camera in its own window"), |ui| {
+        setting_row(ui, p, "Preview", Some("Check the camera"), |ui| {
             let label = if app.sip.preview { "Stop" } else { "Show" };
             if ui.button(label).clicked() {
                 app.sip.preview = !app.sip.preview;
                 app.sip.send(sip_engine::Command::SetPreview(app.sip.preview));
             }
         });
+        if app.sip.preview {
+            let frames = app.sip.video();
+            crate::ui::video::preview(ui, &mut app.ui.video, &frames, p);
+        }
         if app.sip.calls.live_count() > 0 {
             ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
         }

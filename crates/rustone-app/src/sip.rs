@@ -87,6 +87,7 @@ pub struct Sip {
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
     meters: Arc<Meters>,
+    video: Arc<sip_engine::VideoFrames>,
 }
 
 /// What a poll produced that the window should react to.
@@ -119,10 +120,12 @@ impl Sip {
         };
         let feed = engine.as_ref().map_or_else(|| Arc::new(DebugFeed::default()), Engine::debug_feed);
         let meters = engine.as_ref().map_or_else(|| Arc::new(Meters::default()), Engine::meters);
+        let video = engine.as_ref().map_or_else(|| Arc::new(sip_engine::VideoFrames::default()), Engine::video);
         let _ = APP_LOG_FEED.set(feed.clone());
         let mut sip = Self {
             feed,
             meters,
+            video,
             engine,
             events,
             applied: Applied { config: Some(config), ..Applied::default() },
@@ -206,6 +209,11 @@ impl Sip {
         if let Some(engine) = &self.engine {
             engine.send(command);
         }
+    }
+
+    /// The latest video frames (calls' remote video and the preview).
+    pub fn video(&self) -> Arc<sip_engine::VideoFrames> {
+        self.video.clone()
     }
 
     /// Live microphone and speaker levels.

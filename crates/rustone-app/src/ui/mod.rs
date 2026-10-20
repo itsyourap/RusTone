@@ -10,6 +10,7 @@ mod dialer;
 mod settings;
 #[cfg(test)]
 mod test_support;
+pub mod video;
 mod widgets;
 
 use egui::{Align, Layout, Sense, Ui, Vec2, vec2};
@@ -53,10 +54,14 @@ pub struct UiState {
     pub history: history::HistoryView,
     pub messages: messages::MessagesView,
     pub contact_draft: Option<contacts::Draft>,
+    pub video: video::VideoView,
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App) {
     let p = app.palette().clone();
+    if app.ui.video.fullscreen && call::fullscreen(ui, app, &p) {
+        return;
+    }
 
     egui::Panel::top("header")
         .exact_size(HEADER_HEIGHT)

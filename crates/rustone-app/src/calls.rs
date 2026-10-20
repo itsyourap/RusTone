@@ -494,6 +494,14 @@ impl CallBook {
         }
     }
 
+    /// Turns our camera off or on during a video call.
+    pub fn set_camera(&mut self, id: CallId, on: bool) -> Vec<Command> {
+        if self.get(id).is_none() {
+            return Vec::new();
+        }
+        vec![Command::SetVideoSending { call: id, on }]
+    }
+
     pub fn toggle_mic(&mut self) -> Vec<Command> {
         self.mic_muted = !self.mic_muted;
         vec![Command::SetMute { mic: self.mic_muted, speaker: self.speaker_muted }]

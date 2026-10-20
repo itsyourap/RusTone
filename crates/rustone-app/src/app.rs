@@ -674,6 +674,8 @@ impl Resident for App {
     }
 
     fn window_gone(&mut self) {
+        // Video textures belonged to the old window.
+        self.ui.video = crate::ui::video::VideoView::default();
         self.taskbar = fastframe_dock::Taskbar::default();
         // The debug window is a child of the main window.
         crate::ui::debug::set_open(self, false);
