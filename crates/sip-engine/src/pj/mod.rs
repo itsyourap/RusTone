@@ -9,6 +9,7 @@ mod messages;
 mod presence;
 mod quality;
 mod util;
+mod vidtap;
 mod video;
 
 use std::ffi::{c_int, c_uint};
@@ -19,6 +20,7 @@ pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_o
 pub use audio::signal_levels;
 pub use calls::set_levels;
 pub use quality::QualityMonitor;
+pub use vidtap::set_frames as set_video_frames;
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
 use crate::audio::{AudioDevice, AudioDevices, DeviceIds};
@@ -366,7 +368,8 @@ impl Session {
         ac.publish_enabled = a.publish.into();
         // Video: show and send automatically, with the chosen camera.
         if self.video.enabled {
-            ac.vid_in_auto_show = PJ_TRUE;
+            // RusTone draws remote video itself; pjsua's window stays hidden.
+            ac.vid_in_auto_show = PJ_FALSE;
             ac.vid_out_auto_transmit = PJ_TRUE;
             ac.vid_cap_dev = self.camera();
             ac.vid_wnd_flags = video::WND_BORDER | video::WND_RESIZABLE;
@@ -451,6 +454,27 @@ impl Session {
 
     fn camera(&self) -> i32 {
         crate::video::camera_index(&self.video.camera, &self.video_devices)
+    }
+
+    /// Pauses or resumes sending our camera during a call.
+    pub fn set_video_sending(&self, call: CallId, on: bool) -> Result<(), String> {
+        pj_default!(param: pjsua_call_vid_strm_op_param = pjsua_call_vid_strm_op_param_default);
+        let op = if on { PJSUA_CALL_VID_STRM_START_TRANSMIT } else { PJSUA_CALL_VID_STRM_STOP_TRANSMIT };
+        // SAFETY: `param` initialised in place.
+        check(unsafe { pjsua_call_set_vid_strm(call, op, &param) }, if on { "turning the camera on" } else { "turning the camera off" })
+    }
+
+    /// Adds video to a call that has none (a re-INVITE).
+    pub fn add_video(&mut self, call: CallId) -> Result<(), String> {
+        if !self.video.enabled {
+            return Err("video calls are off".into());
+        }
+        pj_default!(param: pjsua_call_vid_strm_op_param = pjsua_call_vid_strm_op_param_default);
+        param.dir = PJMEDIA_DIR_ENCODING_DECODING;
+        param.cap_dev = self.camera();
+        self.set_preview(true);
+        // SAFETY: `param` initialised in place.
+        check(unsafe { pjsua_call_set_vid_strm(call, PJSUA_CALL_VID_STRM_ADD, &param) }, "adding video")
     }
 
     /// Shows or hides the local preview of the chosen camera.
@@ -761,6 +785,7 @@ impl Session {
         }
         callbacks::set_main_account(PJSUA_INVALID_ID);
         self.set_preview(false);
+        vidtap::clear();
         self.buddies.clear();
         self.stop_sound();
         calls::drop_all_tonegens();

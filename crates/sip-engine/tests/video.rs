@@ -7,7 +7,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use sip_engine::{CallState, Command, Direction, Engine, EngineConfig, Event, LocalAccountConfig, VideoConfig};
+use sip_engine::{CallState, Command, Direction, Engine, EngineConfig, Event, LocalAccountConfig, VideoConfig, VideoSource};
 
 #[test]
 #[ignore = "opens video windows on the desktop"]
@@ -50,6 +50,12 @@ fn video_flows_both_ways() {
         }
     }
     std::thread::sleep(Duration::from_secs(3));
+    // The frames RusTone draws: both legs' remote video and the preview.
+    let frames = engine.video();
+    for source in [VideoSource::Call(incoming.id), VideoSource::Preview] {
+        let frame = frames.latest(source).unwrap_or_else(|| panic!("no frames from {source:?}"));
+        assert!(frame.seq > 5 && frame.rgba.len() == (frame.width * frame.height * 4) as usize, "{source:?}: {} frames", frame.seq);
+    }
     engine.send(Command::HangupAll);
     std::thread::sleep(Duration::from_secs(1));
 
@@ -62,5 +68,6 @@ fn video_flows_both_ways() {
         let rx_line = dump.lines().find(|l| l.trim().starts_with("total")).unwrap_or_default();
         assert!(!rx_line.contains(" 0pkt"), "no video packets received:\n{dump}");
     }
+    assert!(frames.latest(VideoSource::Call(incoming.id)).is_none(), "frames stop with the call");
     drop(engine);
 }

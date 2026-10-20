@@ -27,6 +27,10 @@ pub mod shim {
     pub type MsgCallback =
         unsafe extern "C" fn(is_rx: c_int, buf: *const c_char, len: usize, remote: *const c_char, port: c_int, transport: *const c_char);
 
+    /// Called with each video frame a video tap receives: `width * height`
+    /// BGRA pixels.
+    pub type VideoCallback = unsafe extern "C" fn(tap_id: c_int, bgra: *const u8, width: c_uint, height: c_uint);
+
     /// Called with each audio frame a tap receives.
     pub type TapCallback = unsafe extern "C" fn(tap_id: c_int, samples: *const c_short, count: usize, clock_rate: c_uint);
 
@@ -105,6 +109,11 @@ pub mod shim {
         /// Remove with `pjsua_conf_remove_port` then `pjmedia_port_destroy`;
         /// the tap releases its own pool once the bridge lets go of it.
         pub fn jf_tap_add(tap_id: c_int, cb: TapCallback, p_port: *mut *mut pjmedia_port) -> c_int;
+
+        /// Adds a `width` x `height` BGRA video tap to the video bridge,
+        /// fed from bridge slot `source`; returns its slot or -1. Remove
+        /// with `pjsua_vid_conf_remove_port` then `pjmedia_port_destroy`.
+        pub fn jf_video_tap_add(tap_id: c_int, cb: VideoCallback, source: c_int, width: c_uint, height: c_uint, p_port: *mut *mut pjmedia_port) -> c_int;
 
         pub fn jf_sizeof_pjsua_config() -> usize;
         pub fn jf_sizeof_pjsua_media_config() -> usize;

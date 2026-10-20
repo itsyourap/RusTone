@@ -11,8 +11,6 @@ use crate::video::{VideoConfig, VideoDevice};
 /// pjmedia's window flags (videodev.h): a border, resizable.
 pub const WND_BORDER: c_uint = 1;
 pub const WND_RESIZABLE: c_uint = 2;
-/// The preview's size.
-const PREVIEW_SIZE: pjmedia_rect_size = pjmedia_rect_size { w: 320, h: 240 };
 
 /// Every video device pjsua knows.
 pub fn devices() -> Vec<VideoDevice> {
@@ -69,11 +67,11 @@ pub fn apply_codecs(cfg: &VideoConfig) {
     }
 }
 
-/// Starts the local preview of `camera` in its own window, 320x240.
-/// Returns false when the camera can't be opened.
+/// Starts the local preview of `camera`, drawn by RusTone (pjsua's window
+/// stays hidden). Returns false when the camera can't be opened.
 pub fn start_preview(camera: i32) -> bool {
     pj_default!(param: pjsua_vid_preview_param = pjsua_vid_preview_param_default);
-    param.show = PJ_TRUE;
+    param.show = PJ_FALSE;
     param.wnd_flags = WND_BORDER | WND_RESIZABLE;
     // SAFETY: `param` initialised in place.
     let status = unsafe { pjsua_vid_preview_start(camera, &param) };
@@ -81,17 +79,12 @@ pub fn start_preview(camera: i32) -> bool {
         log::warn!("cannot start the video preview: {}", super::util::error_text(status));
         return false;
     }
-    // SAFETY: plain calls on the preview's window.
-    unsafe {
-        let win = pjsua_vid_preview_get_win(camera);
-        if win != PJSUA_INVALID_ID {
-            pjsua_vid_win_set_size(win, &PREVIEW_SIZE);
-        }
-    }
+    super::vidtap::tap_preview(camera);
     true
 }
 
 pub fn stop_preview(camera: i32) {
+    super::vidtap::untap_preview();
     // SAFETY: stopping a preview that isn't running just fails.
     unsafe { pjsua_vid_preview_stop(camera) };
 }

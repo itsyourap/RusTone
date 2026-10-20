@@ -34,7 +34,7 @@ pub use pj::CallOptions;
 pub use message::{IncomingMessage, MessageId, MessageStatus};
 pub use presence::{Presence, PresenceState};
 pub use quality::CallQuality;
-pub use video::{VideoConfig, VideoDevice};
+pub use video::{Frame, VideoConfig, VideoDevice, VideoFrames, VideoSource};
 
 /// Receives engine events. Called from pjsua's threads: keep it short.
 pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
@@ -90,6 +90,10 @@ pub enum Command {
     SetLevels(Levels),
     /// Show or hide the camera preview (Settings' preview button).
     SetPreview(bool),
+    /// Turn our camera on or off during a call.
+    SetVideoSending { call: CallId, on: bool },
+    /// Add video to a call that has none.
+    AddVideo(CallId),
     /// Watch these numbers' presence (contacts with presence on).
     SetBuddies(Vec<String>),
     /// Use these sound devices (by name); applies without a restart.
@@ -138,6 +142,7 @@ pub struct Engine {
     thread: Option<JoinHandle<()>>,
     debug: Arc<debug::DebugFeed>,
     meters: Arc<Meters>,
+    video: Arc<VideoFrames>,
 }
 
 impl Engine {
@@ -150,6 +155,8 @@ impl Engine {
         let sink: Sink = Arc::new(sink);
         let feed = Arc::new(debug::DebugFeed::default());
         let meters = Arc::new(Meters::default());
+        let video = Arc::new(VideoFrames::default());
+        pj::set_video_frames(Some(video.clone()));
         let run_meters = meters.clone();
         pj::debug::set_feed(Some(feed.clone()));
         let (tx, rx) = mpsc::channel();
@@ -164,12 +171,17 @@ impl Engine {
                 RUNNING.store(false, Ordering::SeqCst);
                 SpawnError::Thread(e)
             })?;
-        Ok(Self { tx, thread: Some(thread), debug: feed, meters })
+        Ok(Self { tx, thread: Some(thread), debug: feed, meters, video })
     }
 
     /// The debug window's data (SIP messages, logs, streams, audio).
     pub fn debug_feed(&self) -> Arc<debug::DebugFeed> {
         self.debug.clone()
+    }
+
+    /// The latest video frames (calls' remote video and the preview).
+    pub fn video(&self) -> Arc<VideoFrames> {
+        self.video.clone()
     }
 
     /// Live microphone and speaker levels (see [`Command::MonitorCalls`]).
@@ -190,6 +202,7 @@ impl Drop for Engine {
             let _ = thread.join();
         }
         pj::debug::set_feed(None);
+        pj::set_video_frames(None);
     }
 }
 
@@ -411,6 +424,8 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),
         Command::Transfer { call, target } => call_error(Some(call), s.transfer(call, &target)),
         Command::SetPreview(on) => s.set_preview(on),
+        Command::SetVideoSending { call, on } => call_error(Some(call), s.set_video_sending(call, on)),
+        Command::AddVideo(call) => call_error(Some(call), s.add_video(call)),
         Command::SendMessage { id, target, text, local } => {
             if let Err(reason) = s.send_message(id, &target, &text, local) {
                 log::warn!("message not sent: {reason}");

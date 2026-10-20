@@ -3,7 +3,7 @@
 //! on pjsua's callback threads; shared state is behind mutexes.
 
 use std::collections::HashMap;
-use std::ffi::{c_char, c_short, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_short, c_uint, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -84,6 +84,7 @@ fn user_agent_value(value: &str) -> String {
 
 pub fn forget_call(call_id: CallId) {
     lock(&HEADERS).remove(&call_id);
+    super::vidtap::forget_call(call_id);
     drop_tonegen(ToneKey::Call(call_id));
 }
 
@@ -123,10 +124,37 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
         connected_for: Duration::from_secs(u64::try_from(ci.connect_duration.sec).unwrap_or(0))
             + Duration::from_millis(u64::try_from(ci.connect_duration.msec).unwrap_or(0)),
         remote_video: ci.rem_vid_cnt > 0,
+        video: video_stream(ci).is_some(),
+        sending_video: video_stream(ci).is_some_and(|(index, _)| {
+            // SAFETY: plain query on this call's media.
+            unsafe { pjsua_call_vid_stream_is_running(ci.id, index as c_int, PJMEDIA_DIR_ENCODING) != 0 }
+        }),
         sip_call_id: pj_to_string(&ci.call_id),
         caller_id: headers.caller_id,
         user_agent: headers.user_agent,
         diversion: headers.diversion,
+    }
+}
+
+/// The call's active video stream: its media index and decoder bridge slot.
+fn video_stream(ci: &pjsua_call_info) -> Option<(u32, pjsua_conf_port_id)> {
+    ci.media[..(ci.media_cnt as usize).min(ci.media.len())].iter().find_map(|m| {
+        let active = m.type_ == PJMEDIA_TYPE_VIDEO && m.status == PJSUA_CALL_MEDIA_ACTIVE;
+        // SAFETY: `vid` is the union member for video media.
+        let slot = unsafe { m.stream.vid.dec_slot };
+        (active && slot != PJSUA_INVALID_ID).then_some((m.index, slot))
+    })
+}
+
+/// The call's video decoder slot, for drawing its video.
+pub fn video_decoder_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
+    let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
+    // SAFETY: filled on success and read in place.
+    unsafe {
+        if pjsua_call_get_info(call_id, info.as_mut_ptr()) != PJ_SUCCESS {
+            return None;
+        }
+        video_stream(info.assume_init_ref()).map(|(_, slot)| slot)
     }
 }
 
@@ -167,6 +195,7 @@ fn call_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
 /// Bridges the call's audio with the sound device while media is active
 /// or held by the remote; disconnects it during local hold.
 pub fn update_media(call_id: CallId) {
+    super::vidtap::update_call(call_id, video_decoder_slot(call_id));
     let Some(info) = call_info(call_id) else { return };
     let Some(slot) = call_slot(call_id) else { return };
     // SAFETY: valid slots of this pjsua instance.

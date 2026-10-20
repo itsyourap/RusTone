@@ -72,6 +72,10 @@ pub struct CallInfo {
     /// Time since the call was answered.
     pub connected_for: Duration,
     pub remote_video: bool,
+    /// The call has a video stream running.
+    pub video: bool,
+    /// Our camera is being sent (it can be paused during the call).
+    pub sending_video: bool,
     /// SIP Call-ID.
     pub sip_call_id: String,
     /// From P-Asserted-Identity / Remote-Party-ID (incoming calls).
