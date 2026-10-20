@@ -40,7 +40,7 @@ impl VideoFrames {
     /// Stores a BGRA frame as RGBA.
     pub(crate) fn put_bgra(&self, source: VideoSource, width: u32, height: u32, bgra: &[u8]) {
         let mut rgba = bgra.to_vec();
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px.swap(0, 2);
         }
         let mut frames = self.lock();
