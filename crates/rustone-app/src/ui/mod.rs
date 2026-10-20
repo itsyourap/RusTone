@@ -48,6 +48,10 @@ pub struct UiState {
     pub page: Page,
     /// Whether links open RusTone, read from the registry when Settings opens.
     pub links_handled: Option<bool>,
+    /// Two-number speed-dial buttons whose next press uses the second.
+    pub shortcuts_toggled: std::collections::HashSet<usize>,
+    /// The speed-dial button being edited in Settings (`None` index: new).
+    pub shortcut_draft: Option<(Option<usize>, rustone_core::settings::Shortcut)>,
     pub dialer: dialer::DialerState,
     pub account_draft: Option<accounts::Draft>,
     /// Showing the dialer during a call ("Add call").
@@ -99,7 +103,10 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                         let mwi = app.sip.voicemail.unwrap_or_default();
                         dialer::VoicemailChip { waiting: mwi.waiting, new: mwi.new }
                     });
-                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call, app.settings.features.video, voicemail) {
+                    let chips = shortcut_chips(app);
+                    let extras = dialer::Extras { voicemail, shortcuts: &chips };
+                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call, app.settings.features.video, extras) {
+                        Some(dialer::Action::Shortcut(i)) => run_shortcut(app, i),
                         Some(dialer::Action::Voicemail) => {
                             let number = app.settings.active().map(|a| a.voicemail_number.trim().to_owned()).unwrap_or_default();
                             dial(app, &number, false);
@@ -145,6 +152,75 @@ fn notice(ui: &mut Ui, app: &App, p: &Palette) {
 
 /// Places a call from the dialer. Uses the local account for IP addresses
 /// when it's on, or when there's no usable main account.
+/// The speed-dial buttons with their numbers' presence.
+fn shortcut_chips(app: &App) -> Vec<dialer::ShortcutChip> {
+    let watch = app.settings.features.presence;
+    app.settings
+        .shortcuts
+        .iter()
+        .enumerate()
+        .map(|(i, s)| dialer::ShortcutChip {
+            label: if s.label.trim().is_empty() { s.number.clone() } else { s.label.clone() },
+            presence: (watch && s.presence).then(|| app.sip.presence.get(s.number.trim()).map_or(sip_engine::PresenceState::Unknown, |p| p.state)),
+            toggled: app.ui.shortcuts_toggled.contains(&i),
+        })
+        .collect()
+}
+
+/// Runs a speed-dial button.
+fn run_shortcut(app: &mut App, index: usize) {
+    use rustone_core::settings::ShortcutAction;
+    let Some(shortcut) = app.settings.shortcuts.get(index).cloned() else { return };
+    // Two numbers: alternate between them.
+    let second = !shortcut.number2.trim().is_empty() && !app.ui.shortcuts_toggled.insert(index);
+    if second {
+        app.ui.shortcuts_toggled.remove(&index);
+    }
+    let number = if second { shortcut.number2.trim() } else { shortcut.number.trim() }.to_owned();
+    let current = app.sip.calls.current_call().filter(|c| c.is_live() && !c.is_ringing_in()).map(crate::calls::Call::id);
+    let cfg = app.settings.calls.clone();
+    match shortcut.action {
+        ShortcutAction::Call => {
+            let ringing = app.sip.presence.get(shortcut.number.trim()).is_some_and(|p| p.state == sip_engine::PresenceState::Ringing);
+            if ringing && !cfg.pickup_code.trim().is_empty() {
+                dial(app, &contacts::pickup_number(cfg.pickup_code.trim(), &number), false);
+            } else {
+                dial(app, &number, false);
+            }
+        }
+        ShortcutAction::VideoCall => dial(app, &number, true),
+        ShortcutAction::Message if app.settings.features.messages => {
+            app.ui.page = Page::Messages;
+            app.ui.messages.open = Some(number);
+        }
+        ShortcutAction::Message => app.notify("Messages are off in Settings"),
+        ShortcutAction::Dtmf => match current {
+            Some(id) => app.act(|c| c.dtmf(id, &number, cfg.dtmf_method)),
+            None => app.notify("No call to send the digits to"),
+        },
+        ShortcutAction::Transfer => match current {
+            Some(_) if number.is_empty() => app.ui.call_panel = call::CallPanel::Transfer { target: String::new() },
+            Some(id) => match app.format_number(&number) {
+                Ok(target) => app.act(|c| c.transfer(id, &target, &cfg)),
+                Err(message) => app.notify(message),
+            },
+            None => app.notify("No call to transfer"),
+        },
+        ShortcutAction::AttendedTransfer => match current {
+            Some(id) if cfg.use_attended_code && !cfg.attended_code.trim().is_empty() => match app.format_number(&number) {
+                Ok(target) => app.act(|c| c.attended_transfer_by_code(id, &target, &cfg)),
+                Err(message) => app.notify(message),
+            },
+            // Call it; "Connect with" in the transfer panel joins the two.
+            _ => dial(app, &number, false),
+        },
+        ShortcutAction::Conference => {
+            app.sip.calls.merge_on_answer = current;
+            dial(app, &number, false);
+        }
+    }
+}
+
 pub(crate) fn dial(app: &mut App, target: &str, video: bool) {
     let target = target.trim();
     if target.is_empty() {

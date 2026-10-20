@@ -168,7 +168,7 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
 }
 
 /// The presence dot's colour and words; `None` while unknown.
-fn presence_look(p: &Palette, state: PresenceState) -> Option<(egui::Color32, &'static str)> {
+pub(super) fn presence_look(p: &Palette, state: PresenceState) -> Option<(egui::Color32, &'static str)> {
     match state {
         PresenceState::Unknown => None,
         PresenceState::Offline => Some((p.dim, "Offline")),
@@ -181,7 +181,7 @@ fn presence_look(p: &Palette, state: PresenceState) -> Option<(egui::Color32, &'
 }
 
 /// Call pickup: the code in front of the user part (`**101`).
-fn pickup_number(code: &str, number: &str) -> String {
+pub(super) fn pickup_number(code: &str, number: &str) -> String {
     let n = number.trim();
     let n = n.strip_prefix("sip:").unwrap_or(n);
     format!("{code}{n}")

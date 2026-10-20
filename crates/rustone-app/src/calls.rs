@@ -210,6 +210,9 @@ pub struct CallBook {
     pub ring_level: f32,
     /// The registering account's user and domain, for the deny rules.
     pub account: Option<rustone_core::rules::Identity>,
+    /// A call to join with the next outgoing call once that's answered
+    /// (a conference speed-dial button).
+    pub merge_on_answer: Option<CallId>,
 }
 
 impl CallBook {
@@ -432,6 +435,13 @@ impl CallBook {
                 }
             }
             out.hooks.push((HookKind::CallStart, hook));
+            if info.direction == Direction::Outgoing
+                && let Some(existing) = self.merge_on_answer.take()
+                && existing != id
+                && self.get(existing).is_some_and(Call::is_live)
+            {
+                out.commands.push(Command::Merge(vec![existing, id]));
+            }
             if cfg.auto_hangup > 0 {
                 // Auto hang-up: BYE with a Warning.
                 let end = Command::End { call: id, code: 200, headers: vec![("Warning".into(), "399 localhost \"Call duration exceeded\"".into())] };
@@ -995,6 +1005,22 @@ mod tests {
         o.state = CallState::Disconnected;
         o.status_code = 486;
         assert_eq!(kinds(&b.on_event(&Event::Call(o), &cfg)), [HookKind::CallBusy]);
+    }
+
+    #[test]
+    fn a_conference_button_merges_once_answered() {
+        let cfg = CallSettings::default();
+        let mut b = book();
+        let mut first = info(1, Direction::Outgoing, CallState::Confirmed, "<sip:100@pbx>");
+        first.media = MediaState::Active;
+        b.on_event(&Event::Call(first), &cfg);
+        b.merge_on_answer = Some(1);
+        let mut second = info(2, Direction::Outgoing, CallState::Calling, "<sip:200@pbx>");
+        assert!(!b.on_event(&Event::Call(second.clone()), &cfg).commands.iter().any(|c| matches!(c, Command::Merge(_))), "not before it's answered");
+        second.state = CallState::Confirmed;
+        second.media = MediaState::Active;
+        assert!(b.on_event(&Event::Call(second), &cfg).commands.contains(&Command::Merge(vec![1, 2])));
+        assert_eq!(b.merge_on_answer, None, "once");
     }
 
     #[test]

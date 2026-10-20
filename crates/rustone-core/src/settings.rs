@@ -24,6 +24,8 @@ pub struct Settings {
     pub video: VideoSettings,
     pub recording: RecordingSettings,
     pub hooks: crate::hooks::HookSettings,
+    /// Speed-dial buttons on the dialer.
+    pub shortcuts: Vec<Shortcut>,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -240,6 +242,38 @@ impl Default for FeatureSettings {
     fn default() -> Self {
         Self { presence: true, messages: true, transfer: true, video: true }
     }
+}
+
+/// A speed-dial button.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Shortcut {
+    pub label: String,
+    pub number: String,
+    /// With one, the button toggles: the next press uses this number, the
+    /// one after the first again (e.g. log in/out codes).
+    pub number2: String,
+    pub action: ShortcutAction,
+    /// Watch the number's presence (BLF); a ringing number is picked up.
+    pub presence: bool,
+}
+
+/// What a speed-dial button does with its number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShortcutAction {
+    #[default]
+    Call,
+    VideoCall,
+    Message,
+    /// Send the number as DTMF in the current call.
+    Dtmf,
+    /// Transfer the current call to it.
+    Transfer,
+    /// Call it, to connect the current call to it afterwards.
+    AttendedTransfer,
+    /// Call it and join it to the current call once answered.
+    Conference,
 }
 
 /// Call recording. Always WAV.

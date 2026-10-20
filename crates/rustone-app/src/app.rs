@@ -547,7 +547,16 @@ impl App {
         };
         self.sip.sync(&self.settings);
         // Without the presence feature nothing is subscribed; contacts keep their choice.
-        let buddies = if self.settings.features.presence { self.phonebook.watched_numbers() } else { Vec::new() };
+        let buddies = if self.settings.features.presence {
+            // Contacts and speed-dial buttons with presence on (BLF).
+            let mut numbers = self.phonebook.watched_numbers();
+            numbers.extend(self.settings.shortcuts.iter().filter(|s| s.presence).map(|s| s.number.trim().to_owned()).filter(|n| !n.is_empty()));
+            numbers.sort();
+            numbers.dedup();
+            numbers
+        } else {
+            Vec::new()
+        };
         self.sip.set_buddies(buddies);
         let values = self.directory_values();
         let ready = matches!(self.sip.reg, sip_engine::RegState::Registered { .. } | sip_engine::RegState::NoRegistrar);

@@ -147,6 +147,10 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Speed dial");
+        card(ui, p, |ui| speed_dial(ui, app, p));
+        ui.add_space(12.0);
+
         section_title(ui, p, "Recording");
         card(ui, p, |ui| {
             let recording = &mut app.settings.recording;
@@ -343,6 +347,92 @@ fn auto_answer_when_label(when: AutoAnswerWhen) -> &'static str {
         AutoAnswerWhen::NoOtherCalls => "Don't answer",
         AutoAnswerWhen::OthersOnHold => "Answer if the others are on hold",
         AutoAnswerWhen::Always => "Answer anyway",
+    }
+}
+
+/// The speed-dial buttons: a list to edit, remove or add to.
+fn speed_dial(ui: &mut Ui, app: &mut App, p: &Palette) {
+    use rustone_core::settings::{Shortcut, ShortcutAction};
+    ui.label(egui::RichText::new("Buttons under the dialer's keypad. With presence on, a dot shows the number's state and a press picks up its ringing call.").size(12.0).color(p.dim));
+    if let Some((index, mut draft)) = app.ui.shortcut_draft.take() {
+        let mut keep = true;
+        widgets::text_field(ui, p, "Label", "e.g. Reception", &mut draft.label);
+        widgets::text_field(ui, p, "Number", "Number, SIP address or digits", &mut draft.number);
+        widgets::text_field(ui, p, "Second number (optional)", "Pressed again, uses this one", &mut draft.number2);
+        ui.add_space(4.0);
+        setting_stack(ui, p, "Action", None, |ui| {
+            egui::ComboBox::from_id_salt("shortcut-action").width(ui.available_width()).selected_text(shortcut_label(draft.action)).show_ui(ui, |ui| {
+                for action in [
+                    ShortcutAction::Call,
+                    ShortcutAction::VideoCall,
+                    ShortcutAction::Message,
+                    ShortcutAction::Dtmf,
+                    ShortcutAction::Transfer,
+                    ShortcutAction::AttendedTransfer,
+                    ShortcutAction::Conference,
+                ] {
+                    ui.selectable_value(&mut draft.action, action, shortcut_label(action));
+                }
+            });
+        });
+        setting_row(ui, p, "Presence (BLF)", Some("Watch this number"), |ui| {
+            widgets::toggle(ui, p, &mut draft.presence, "Presence (BLF)");
+        });
+        ui.horizontal(|ui| {
+            let ready = !draft.number.trim().is_empty() || matches!(draft.action, ShortcutAction::Transfer);
+            if ui.add_enabled(ready, egui::Button::new("Save")).clicked() {
+                match index {
+                    Some(i) if i < app.settings.shortcuts.len() => app.settings.shortcuts[i] = draft.clone(),
+                    _ => app.settings.shortcuts.push(draft.clone()),
+                }
+                app.mark_settings_dirty();
+                keep = false;
+            }
+            if ui.button("Cancel").clicked() {
+                keep = false;
+            }
+        });
+        if keep {
+            app.ui.shortcut_draft = Some((index, draft));
+        }
+        return;
+    }
+    let mut remove = None;
+    for (i, shortcut) in app.settings.shortcuts.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let title = if shortcut.label.trim().is_empty() { shortcut.number.clone() } else { shortcut.label.clone() };
+            ui.label(egui::RichText::new(title).color(p.text));
+            ui.label(egui::RichText::new(format!("{} · {}", shortcut_label(shortcut.action), shortcut.number)).size(12.0).color(p.dim));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::icon_button(ui, p, Icon::Trash, p.danger, &format!("Remove {}", shortcut.label)).clicked() {
+                    remove = Some(i);
+                }
+                if widgets::icon_button(ui, p, Icon::Pencil, p.secondary, &format!("Edit {}", shortcut.label)).clicked() {
+                    app.ui.shortcut_draft = Some((Some(i), shortcut.clone()));
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        app.settings.shortcuts.remove(i);
+        app.ui.shortcuts_toggled.clear();
+        app.mark_settings_dirty();
+    }
+    if ui.button("Add a button").clicked() {
+        app.ui.shortcut_draft = Some((None, Shortcut::default()));
+    }
+}
+
+fn shortcut_label(action: rustone_core::settings::ShortcutAction) -> &'static str {
+    use rustone_core::settings::ShortcutAction as A;
+    match action {
+        A::Call => "Call",
+        A::VideoCall => "Video call",
+        A::Message => "Message",
+        A::Dtmf => "Send digits",
+        A::Transfer => "Transfer",
+        A::AttendedTransfer => "Attended transfer",
+        A::Conference => "Add to conference",
     }
 }
 

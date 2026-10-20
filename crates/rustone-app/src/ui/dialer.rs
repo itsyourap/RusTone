@@ -46,7 +46,31 @@ pub enum Action {
     Key(String),
     /// Call the voicemail box.
     Voicemail,
+    /// A speed-dial button, by its place in the settings.
+    Shortcut(usize),
 }
+
+/// A speed-dial button as the dialer shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortcutChip {
+    pub label: String,
+    /// Its number's presence (BLF), when watched.
+    pub presence: Option<sip_engine::PresenceState>,
+    /// A two-number button showing its second state.
+    pub toggled: bool,
+}
+
+/// What the dialer shows besides the keypad.
+#[derive(Debug, Clone, Default)]
+pub struct Extras<'a> {
+    pub voicemail: Option<VoicemailChip>,
+    pub shortcuts: &'a [ShortcutChip],
+}
+
+/// Speed-dial buttons per row.
+const SHORTCUT_COLUMNS: usize = 3;
+const SHORTCUT_HEIGHT: f32 = 34.0;
+const SHORTCUT_GAP: f32 = 8.0;
 
 /// The voicemail box, when the account has one (the voicemail
 /// button, lit by MWI).
@@ -83,9 +107,9 @@ fn allowed(c: char) -> bool {
     c.is_ascii_alphanumeric() || "*#+@.:-_;=".contains(c)
 }
 
-pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool, video: bool, voicemail: Option<VoicemailChip>) -> Option<Action> {
+pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool, video: bool, extras: Extras<'_>) -> Option<Action> {
     let mut action = None;
-    if let Some(vm) = voicemail
+    if let Some(vm) = extras.voicemail
         && voicemail_chip(ui, p, vm, registered)
     {
         action = Some(Action::Voicemail);
@@ -93,7 +117,9 @@ pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool,
 
     ui.with_layout(Layout::top_down(Align::Center), |ui| {
         let keypad_height = 4.0 * KEY_SIZE + 3.0 * KEY_GAP;
-        let content_height = 64.0 + 24.0 + keypad_height + 28.0 + KEY_SIZE;
+        let shortcut_rows = extras.shortcuts.len().div_ceil(SHORTCUT_COLUMNS) as f32;
+        let shortcuts_height = if shortcut_rows > 0.0 { 20.0 + shortcut_rows * (SHORTCUT_HEIGHT + SHORTCUT_GAP) } else { 0.0 };
+        let content_height = 64.0 + 24.0 + keypad_height + 28.0 + KEY_SIZE + shortcuts_height;
         ui.add_space(((ui.available_height() - content_height) / 2.0).max(8.0));
 
         if number_field(ui, p, state) && registered && !state.number.is_empty() {
@@ -140,8 +166,61 @@ pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool,
                 }
             });
         });
+        if !extras.shortcuts.is_empty() {
+            ui.add_space(20.0);
+            if let Some(i) = shortcuts(ui, p, extras.shortcuts) {
+                action = Some(Action::Shortcut(i));
+            }
+        }
     });
     action
+}
+
+/// The speed-dial buttons in rows under the keypad, each with its BLF dot
+/// (blinking while that number rings, when a press picks the call up).
+fn shortcuts(ui: &mut Ui, p: &Palette, chips: &[ShortcutChip]) -> Option<usize> {
+    let mut pressed = None;
+    let width = 3.0 * KEY_SIZE + 2.0 * KEY_GAP + 40.0;
+    let chip_width = (width - (SHORTCUT_COLUMNS - 1) as f32 * SHORTCUT_GAP) / SHORTCUT_COLUMNS as f32;
+    for (row, row_chips) in chips.chunks(SHORTCUT_COLUMNS).enumerate() {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SHORTCUT_GAP;
+            let used = row_chips.len() as f32 * chip_width + (row_chips.len() as f32 - 1.0) * SHORTCUT_GAP;
+            ui.add_space(((ui.available_width() - used) / 2.0).max(0.0));
+            for (col, chip) in row_chips.iter().enumerate() {
+                let index = row * SHORTCUT_COLUMNS + col;
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, SHORTCUT_HEIGHT), egui::Sense::click());
+                let look = chip.presence.and_then(|s| super::contacts::presence_look(p, s));
+                let name = match look {
+                    Some((_, words)) => format!("{}, {words}", chip.label),
+                    None => chip.label.clone(),
+                };
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                let fill = if chip.toggled { p.accent.gamma_multiply(0.35) } else if response.hovered() { p.surface_hover } else { p.surface };
+                ui.painter().rect_filled(rect, egui::CornerRadius::same(10), fill);
+                let mut text_left = rect.left() + 10.0;
+                if let (Some(state), Some((color, _))) = (chip.presence, look) {
+                    let lit = if state == sip_engine::PresenceState::Ringing {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+                        (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0
+                    } else {
+                        true
+                    };
+                    if lit {
+                        ui.painter().circle_filled(egui::pos2(rect.left() + 12.0, rect.center().y), 4.0, color);
+                    }
+                    text_left += 10.0;
+                }
+                let galley = widgets::elided(ui, chip.label.clone(), Weight::Medium.font_id(12.5), p.text, rect.right() - 8.0 - text_left);
+                ui.painter().galley(egui::pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, p.text);
+                if response.on_hover_text(&name).clicked() {
+                    pressed = Some(index);
+                }
+            }
+        });
+        ui.add_space(SHORTCUT_GAP - ui.spacing().item_spacing.y);
+    }
+    pressed
 }
 
 /// Indents a row of `keys` keypad buttons so it's centred.
@@ -318,8 +397,25 @@ mod tests {
     /// The dialer in a test harness, with the app's fonts and icons.
     fn dialer_harness() -> egui_kittest::Harness<'static, DialerState> {
         crate::ui::test_support::harness([475.0, 760.0], DialerState::default(), |ui, state| {
-            show(ui, &Palette::dark(), state, true, true, None);
+            show(ui, &Palette::dark(), state, true, true, Extras::default());
         })
+    }
+
+    #[test]
+    fn speed_dial_buttons_report_which_was_pressed() {
+        use egui_kittest::kittest::Queryable;
+        let chips = [
+            ShortcutChip { label: "Reception".into(), presence: None, toggled: false },
+            ShortcutChip { label: "Sales".into(), presence: Some(sip_engine::PresenceState::Ringing), toggled: false },
+        ];
+        let mut harness = crate::ui::test_support::harness([475.0, 900.0], None::<usize>, move |ui, pressed| {
+            if let Some(Action::Shortcut(i)) = show(ui, &Palette::dark(), &mut DialerState::default(), true, true, Extras { voicemail: None, shortcuts: &chips }) {
+                *pressed = Some(i);
+            }
+        });
+        harness.get_by_label("Sales, Ringing").click();
+        harness.run_steps(2);
+        assert_eq!(*harness.state(), Some(1));
     }
 
     #[test]
@@ -327,7 +423,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut harness = crate::ui::test_support::harness([475.0, 760.0], false, |ui, clicked| {
             let vm = VoicemailChip { waiting: true, new: Some(3) };
-            if show(ui, &Palette::dark(), &mut DialerState::default(), true, true, Some(vm)) == Some(Action::Voicemail) {
+            if show(ui, &Palette::dark(), &mut DialerState::default(), true, true, Extras { voicemail: Some(vm), shortcuts: &[] }) == Some(Action::Voicemail) {
                 *clicked = true;
             }
         });
