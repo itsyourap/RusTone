@@ -8,6 +8,7 @@ use rusqlite::{Connection, Row, params};
 
 use crate::contacts::Contact;
 use crate::history::{CallKind, CallRecord};
+use crate::messages::{Conversation, MessageRecord, MessageState};
 
 pub const FILE_NAME: &str = "rustone.db";
 
@@ -46,6 +47,18 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE contacts (
         info TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX history_time ON history (time);",
+    "CREATE TABLE messages (
+        id INTEGER PRIMARY KEY,
+        peer TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        outgoing INTEGER NOT NULL,
+        time INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        state INTEGER NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        unread INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX messages_peer_time ON messages (peer, time);",
 ];
 
 /// Only the last 1000 calls are kept.
@@ -84,6 +97,9 @@ impl Store {
         for (i, step) in MIGRATIONS.iter().enumerate().skip(version) {
             conn.execute_batch(&format!("BEGIN; {step} PRAGMA user_version = {}; COMMIT;", i + 1)).map_err(err)?;
         }
+        // A message still sending when RusTone stopped will never get its answer.
+        conn.execute("UPDATE messages SET state = ?1, reason = 'Not sent' WHERE state = ?2", [MessageState::Failed.code(), MessageState::Sending.code()])
+            .map_err(err)?;
         Ok(Self { conn })
     }
 
@@ -195,6 +211,73 @@ impl Store {
     }
 }
 
+const MESSAGE_COLUMNS: &str = "id, peer, name, outgoing, time, text, state, reason, unread";
+
+fn message_from_row(r: &Row<'_>) -> rusqlite::Result<MessageRecord> {
+    Ok(MessageRecord {
+        id: r.get(0)?,
+        peer: r.get(1)?,
+        name: r.get(2)?,
+        outgoing: r.get(3)?,
+        time: r.get(4)?,
+        text: r.get(5)?,
+        state: MessageState::from_code(r.get(6)?),
+        reason: r.get(7)?,
+        unread: r.get(8)?,
+    })
+}
+
+impl Store {
+    /// Saves a message; returns its id.
+    pub fn add_message(&self, m: &MessageRecord) -> Result<i64> {
+        self.conn
+            .execute(
+                "INSERT INTO messages (peer, name, outgoing, time, text, state, reason, unread) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![m.peer, m.name, m.outgoing, m.time, m.text, m.state.code(), m.reason, m.unread],
+            )
+            .map_err(err)?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn set_message_state(&self, id: i64, state: MessageState, reason: &str) -> Result<()> {
+        self.conn.execute("UPDATE messages SET state = ?1, reason = ?2 WHERE id = ?3", params![state.code(), reason, id]).map_err(err)?;
+        Ok(())
+    }
+
+    /// One conversation, oldest first.
+    pub fn messages_with(&self, peer: &str) -> Result<Vec<MessageRecord>> {
+        let mut stmt = self.conn.prepare(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE peer = ?1 ORDER BY time, id")).map_err(err)?;
+        stmt.query_map([peer], message_from_row).map_err(err)?.collect::<std::result::Result<Vec<_>, _>>().map_err(err)
+    }
+
+    /// Every conversation, the most recent first.
+    pub fn conversations(&self) -> Result<Vec<Conversation>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {MESSAGE_COLUMNS}, (SELECT count(*) FROM messages u WHERE u.peer = m.peer AND u.unread = 1)
+                 FROM messages m WHERE id = (SELECT id FROM messages l WHERE l.peer = m.peer ORDER BY time DESC, id DESC LIMIT 1)
+                 ORDER BY time DESC, id DESC"
+            ))
+            .map_err(err)?;
+        stmt.query_map([], |r| Ok(Conversation { peer: r.get(1)?, last: message_from_row(r)?, unread: r.get(9)? }))
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)
+    }
+
+    /// The conversation has been seen.
+    pub fn mark_read(&self, peer: &str) -> Result<()> {
+        self.conn.execute("UPDATE messages SET unread = 0 WHERE peer = ?1 AND unread = 1", [peer]).map_err(err)?;
+        Ok(())
+    }
+
+    pub fn delete_conversation(&self, peer: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM messages WHERE peer = ?1", [peer]).map_err(err)?;
+        Ok(())
+    }
+}
+
 fn contact_from_row(r: &Row<'_>) -> rusqlite::Result<Contact> {
     Ok(Contact {
         id: r.get(0)?,
@@ -253,6 +336,64 @@ mod tests {
         assert_eq!(store.calls().unwrap().len() as i64, HISTORY_LIMIT - 1);
         store.clear_calls().unwrap();
         assert!(store.calls().unwrap().is_empty());
+    }
+
+    #[test]
+    fn conversations_and_their_messages() {
+        let store = Store::open_in_memory().unwrap();
+        let msg = |peer: &str, time, outgoing, state, unread| MessageRecord {
+            id: 0,
+            peer: peer.into(),
+            name: String::new(),
+            outgoing,
+            time,
+            text: format!("{peer} at {time}"),
+            state,
+            reason: String::new(),
+            unread,
+        };
+        store.add_message(&msg("1001", 1, false, MessageState::Received, true)).unwrap();
+        store.add_message(&msg("1002", 2, false, MessageState::Received, true)).unwrap();
+        let sent = store.add_message(&msg("1001", 3, true, MessageState::Sending, false)).unwrap();
+        store.add_message(&msg("1001", 4, false, MessageState::Received, true)).unwrap();
+
+        let list = store.conversations().unwrap();
+        assert_eq!(list.iter().map(|c| (c.peer.as_str(), c.last.time, c.unread)).collect::<Vec<_>>(), [("1001", 4, 2), ("1002", 2, 1)]);
+        store.set_message_state(sent, MessageState::Failed, "404 Not Found").unwrap();
+        let ada = store.messages_with("1001").unwrap();
+        assert_eq!(ada.iter().map(|m| m.time).collect::<Vec<_>>(), [1, 3, 4]);
+        assert_eq!((ada[1].state, ada[1].reason.as_str()), (MessageState::Failed, "404 Not Found"));
+        store.mark_read("1001").unwrap();
+        assert_eq!(store.conversations().unwrap()[0].unread, 0);
+        store.delete_conversation("1002").unwrap();
+        assert_eq!(store.conversations().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn unanswered_sends_fail_on_reopen() {
+        let dir = std::env::temp_dir().join(format!("rustone-store-msg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        {
+            let store = Store::open(&path).unwrap();
+            let m = MessageRecord {
+                id: 0,
+                peer: "1001".into(),
+                name: String::new(),
+                outgoing: true,
+                time: 1,
+                text: "hi".into(),
+                state: MessageState::Sending,
+                reason: String::new(),
+                unread: false,
+            };
+            store.add_message(&m).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let m = &store.messages_with("1001").unwrap()[0];
+        assert_eq!((m.state, m.reason.as_str()), (MessageState::Failed, "Not sent"));
+        drop(store);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

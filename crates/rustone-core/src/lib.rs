@@ -5,6 +5,7 @@ pub mod codecs;
 pub mod contacts;
 pub mod directory;
 pub mod history;
+pub mod messages;
 pub mod secrets;
 pub mod settings;
 pub mod sounds;
