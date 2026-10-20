@@ -386,6 +386,7 @@ pub fn account_config(a: &Account, _sip: &rustone_core::settings::SipSettings) -
         allow_rewrite: a.allow_rewrite,
         disable_session_timer: a.disable_session_timer,
         mwi: !a.voicemail_number.trim().is_empty(),
+        hide_cid: a.hide_cid,
     }
 }
 
@@ -421,6 +422,7 @@ fn local_config(local: &LocalAccount) -> Option<LocalAccountConfig> {
         display_name: local.display_name.trim().to_owned(),
         username: local.username.trim().to_owned(),
         domain: local.domain.trim().to_owned(),
+        hide_cid: false,
     })
 }
 

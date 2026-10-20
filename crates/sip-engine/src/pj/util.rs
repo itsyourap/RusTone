@@ -100,6 +100,16 @@ impl MsgData {
         Self { msg, _strings: strings, _headers: storage }
     }
 
+    /// Uses `uri` as the From of a new call or request (pjsua's
+    /// `local_uri`) instead of the account's identity.
+    pub fn with_local_uri(mut self, uri: &str) -> Self {
+        if let Ok(uri) = CString::new(uri) {
+            self.msg.local_uri = pj_str_t { ptr: uri.as_ptr().cast_mut(), slen: uri.as_bytes().len() as pj_ssize_t };
+            self._strings.push(uri);
+        }
+        self
+    }
+
     pub fn as_ptr(&self) -> *const pjsua_msg_data {
         &*self.msg
     }

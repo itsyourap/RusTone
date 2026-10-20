@@ -46,7 +46,7 @@ pub struct Account {
     pub dialing_prefix: String,
     /// Dial plan rules, `|`-separated (see [`crate::dialplan`]).
     pub dial_plan: String,
-    /// Send `Privacy: id` with an anonymous From (Phase 9).
+    /// Hide our caller ID on calls: `Privacy: id` and an anonymous From.
     pub hide_cid: bool,
     /// Number dialled by the voicemail button; enables MWI.
     pub voicemail_number: String,

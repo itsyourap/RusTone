@@ -44,6 +44,8 @@ pub struct Session {
     account: pjsua_acc_id,
     /// The main account's settings, for building call URIs.
     account_config: Option<AccountConfig>,
+    /// The local account hides our caller ID.
+    local_hide_cid: bool,
     local_account: pjsua_acc_id,
     player: Option<calls::Player>,
     /// No sound device at all (tests, headless use).
@@ -78,6 +80,7 @@ impl Session {
             rtp_port_max: cfg.rtp_port_max,
             account: PJSUA_INVALID_ID,
             account_config: None,
+            local_hide_cid: false,
             local_account: PJSUA_INVALID_ID,
             player: None,
             null_audio: cfg.null_audio,
@@ -390,6 +393,7 @@ impl Session {
             self.local_account = PJSUA_INVALID_ID;
         }
         let Some(local) = local else { return };
+        self.local_hide_cid = local.hide_cid;
         if self.udp_local == PJSUA_INVALID_ID {
             log::warn!("local account needs the local-account transports; enable it in the engine config");
             return;
@@ -653,9 +657,19 @@ impl Session {
         // offers have none.
         opt.txt_cnt = 0;
         let dst = self.arena.pj(&uri);
+        let hide_cid = if local { self.local_hide_cid } else { self.account_config.as_ref().is_some_and(|a| a.hide_cid) };
+        // Hide caller ID: ask the network to withhold our identity and
+        // send an anonymous From.
+        let msg = if hide_cid {
+            // As one From (not a second From header).
+            util::MsgData::new(&[("Privacy".into(), "id".into())]).with_local_uri("\"Anonymous\" <sip:anonymous@anonymous.invalid>")
+        } else {
+            util::MsgData::new(&[])
+        };
         let mut id = PJSUA_INVALID_ID;
-        // SAFETY: `opt` initialised in place; `dst` lives in the arena.
-        check(unsafe { pjsua_call_make_call(acc, &dst, &opt, std::ptr::null_mut(), std::ptr::null(), &mut id) }, "calling")?;
+        // SAFETY: `opt` initialised in place; `dst` lives in the arena and
+        // `msg` until the call returns.
+        check(unsafe { pjsua_call_make_call(acc, &dst, &opt, std::ptr::null_mut(), msg.as_ptr(), &mut id) }, "calling")?;
         Ok(id)
     }
 

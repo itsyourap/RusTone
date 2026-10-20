@@ -78,6 +78,17 @@ fn responses_headers_and_delayed_commands() {
     assert!(bye.is_request("BYE"), "the cancelled forward was sent: {}", bye.first);
     assert!(bye.header("Warning").starts_with("399"), "Warning: {}", bye.header("Warning"));
     peer.reply(&bye, "200 OK", "", "");
+
+    // 4. Hidden caller ID: Privacy: id and a single, anonymous From.
+    engine.send(Command::SetLocalAccount(Some(LocalAccountConfig { username: "rustone-test".into(), hide_cid: true, ..LocalAccountConfig::default() })));
+    std::thread::sleep(Duration::from_millis(300));
+    engine.send(Command::MakeCall { target: CALLER.into(), video: false, local: true });
+    let invite = peer.recv("our INVITE", |m| m.is_request("INVITE"));
+    assert_eq!(invite.header("Privacy"), "id");
+    let froms: Vec<&str> = invite.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("From") || n == "f").map(|(_, v)| v.as_str()).collect();
+    assert_eq!(froms.len(), 1, "one From: {froms:?}");
+    assert!(froms[0].contains("anonymous@anonymous.invalid"), "anonymous From: {froms:?}");
+    peer.reply(&invite, "486 Busy Here", "", "");
     std::thread::sleep(Duration::from_millis(300));
     drop(engine);
 }

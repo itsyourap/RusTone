@@ -148,6 +148,8 @@ pub struct AccountConfig {
     /// Subscribe to message-waiting indications (on
     /// when a voicemail number is set).
     pub mwi: bool,
+    /// Hide our caller ID on calls: `Privacy: id` and an anonymous From.
+    pub hide_cid: bool,
 }
 
 impl Default for AccountConfig {
@@ -170,6 +172,7 @@ impl Default for AccountConfig {
             allow_rewrite: false,
             disable_session_timer: false,
             mwi: false,
+            hide_cid: false,
         }
     }
 }
@@ -232,6 +235,8 @@ pub struct LocalAccountConfig {
     pub username: String,
     /// Host for the identity; empty uses the local address.
     pub domain: String,
+    /// Hide our caller ID on calls.
+    pub hide_cid: bool,
 }
 
 #[cfg(test)]
