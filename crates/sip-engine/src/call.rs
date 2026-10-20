@@ -72,8 +72,12 @@ pub struct CallInfo {
     /// Time since the call was answered.
     pub connected_for: Duration,
     pub remote_video: bool,
-    /// The call has a video stream running.
+    /// The call uses video, in either direction.
     pub video: bool,
+    /// The peer's video reaches us (off while its camera is off).
+    pub receiving_video: bool,
+    /// The peer accepts our video (our camera may still be off).
+    pub sending_video: bool,
     /// We stopped sending our camera (or the peer added video and it
     /// hasn't been turned on yet).
     pub camera_off: bool,

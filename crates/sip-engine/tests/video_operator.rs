@@ -91,10 +91,15 @@ impl Operator {
 }
 
 fn sdp(version: u32, video_port: u16) -> String {
+    sdp_dir(version, video_port, "sendrecv")
+}
+
+/// `dir` is the operator's video direction ("recvonly": its camera is off).
+fn sdp_dir(version: u32, video_port: u16, dir: &str) -> String {
     let video = if video_port == 0 {
         "m=video 0 RTP/AVP 97\r\n".to_owned()
     } else {
-        format!("m=video {video_port} RTP/AVP 97\r\na=rtpmap:97 H264/90000\r\na=fmtp:97 profile-level-id=42C00C; packetization-mode=1;\r\na=sendrecv\r\n")
+        format!("m=video {video_port} RTP/AVP 97\r\na=rtpmap:97 H264/90000\r\na=fmtp:97 profile-level-id=42C00C; packetization-mode=1;\r\na={dir}\r\n")
     };
     format!(
         "v=0\r\no=IBCF 1929502446 {version} IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 49032 RTP/AVP 0 120\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:120 telephone-event/8000\r\na=fmtp:120 0-15\r\na=sendrecv\r\n{video}"
@@ -173,6 +178,49 @@ fn video_offered_by_the_operator_after_a_rejecting_183() {
         }
     }
     assert!(video, "the call has video");
+
+    // The peer turns its camera off (re-INVITE with video recvonly): the
+    // call keeps its video, we still send ours, and receive nothing.
+    let reinvite = |cseq: u32, dir: &str| {
+        let offer = sdp_dir(cseq, 49024, dir);
+        op.send(
+            invite.from,
+            &format!(
+                "INVITE {contact} SIP/2.0\r\nVia: SIP/2.0/UDP {OPERATOR};branch=z9hG4bK-op-reinvite{cseq};rport\r\nMax-Forwards: 70\r\nFrom: {to}\r\nTo: {from}\r\nCall-ID: {}\r\nCSeq: {cseq} INVITE\r\nContact: <sip:op@{OPERATOR}>\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{offer}",
+                invite.header("Call-ID"),
+                offer.len()
+            ),
+        );
+        let ok = op.recv("the re-INVITE's answer", |m| m.is_response(200, "INVITE") && m.header("CSeq").starts_with(&format!("{cseq} ")));
+        op.send(
+            invite.from,
+            &format!(
+                "ACK {contact} SIP/2.0\r\nVia: SIP/2.0/UDP {OPERATOR};branch=z9hG4bK-op-ack{cseq};rport\r\nMax-Forwards: 70\r\nFrom: {to}\r\nTo: {}\r\nCall-ID: {}\r\nCSeq: {cseq} ACK\r\nContent-Length: 0\r\n\r\n",
+                ok.header("To"),
+                invite.header("Call-ID")
+            ),
+        );
+        ok
+    };
+    let wait_for = |what: &str, want: &dyn Fn(&sip_engine::CallInfo) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            if let Ok(Event::Call(c)) = rx.recv_timeout(Duration::from_millis(200))
+                && c.id == call.id
+                && want(&c)
+            {
+                return c;
+            }
+        }
+    };
+    let ok = reinvite(3, "recvonly");
+    assert!(ok.body.contains("a=sendonly"), "we keep sending:\n{}", ok.body);
+    wait_for("the peer's camera off", &|c| c.video && !c.receiving_video && c.sending_video);
+    // And on again.
+    reinvite(4, "sendrecv");
+    wait_for("the peer's camera on", &|c| c.video && c.receiving_video && c.sending_video);
+
     engine.send(Command::HangupAll);
     let bye = op.recv("the BYE", |m| m.is_request("BYE"));
     op.reply(&bye, "200 OK", "", "");

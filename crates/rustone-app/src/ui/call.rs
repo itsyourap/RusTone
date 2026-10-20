@@ -38,7 +38,7 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
             let width = ui.available_width();
             let (rect, _) = ui.allocate_exact_size(vec2(width, (width * 9.0 / 16.0).min(260.0)), Sense::hover());
             let frames = app.sip.video();
-            if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call.id(), !call.info.camera_off) {
+            if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call_video(&call)) {
                 video_action(ui, app, call.id(), action);
             }
             ui.add_space(8.0);
@@ -76,6 +76,18 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     }));
 }
 
+/// What the call's video shows.
+fn call_video(call: &Call) -> super::video::CallVideo {
+    let camera_on = !call.info.camera_off;
+    super::video::CallVideo {
+        call: call.id(),
+        receiving: call.info.receiving_video,
+        camera_on,
+        sending: camera_on && call.info.sending_video,
+        held: matches!(call.info.media, MediaState::LocalHold | MediaState::RemoteHold),
+    }
+}
+
 /// Acts on the video's camera and full-screen buttons.
 fn video_action(ui: &Ui, app: &mut App, call: CallId, action: super::video::VideoAction) {
     match action {
@@ -103,7 +115,7 @@ pub fn fullscreen(ui: &mut Ui, app: &mut App, p: &Palette) -> bool {
     egui::CentralPanel::default().frame(egui::Frame::new().fill(egui::Color32::BLACK)).show(ui, |ui| {
         let rect = ui.max_rect();
         let frames = app.sip.video();
-        if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call.id(), !call.info.camera_off) {
+        if let Some(action) = super::video::call_video(ui, &mut app.ui.video, &frames, p, rect, call_video(&call)) {
             video_action(ui, app, call.id(), action);
         }
         // Hang up from full screen too.

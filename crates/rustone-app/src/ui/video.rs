@@ -69,20 +69,43 @@ fn fit(area: Rect, size: Vec2) -> Rect {
     Rect::from_center_size(area.center(), size * scale)
 }
 
-/// A call's video in `rect`: remote video (or a placeholder until it
-/// arrives), the camera in a corner while it's sent, and buttons for the
+/// What a call's video shows.
+#[derive(Debug, Clone, Copy)]
+pub struct CallVideo {
+    pub call: CallId,
+    /// The peer's video reaches us (its camera is on).
+    pub receiving: bool,
+    /// Our camera is on (the button's state).
+    pub camera_on: bool,
+    /// Our camera is on and the peer accepts it.
+    pub sending: bool,
+    /// The call is on hold (either side).
+    pub held: bool,
+}
+
+/// A call's video in `rect`: remote video (or a placeholder while there's
+/// none), the camera in a corner while it's sent, and buttons for the
 /// camera and full screen.
-pub fn call_video(ui: &mut Ui, view: &mut VideoView, frames: &VideoFrames, p: &Palette, rect: Rect, call: CallId, sending: bool) -> Option<VideoAction> {
+pub fn call_video(ui: &mut Ui, view: &mut VideoView, frames: &VideoFrames, p: &Palette, rect: Rect, video: CallVideo) -> Option<VideoAction> {
+    let CallVideo { call, receiving, camera_on, sending, held } = video;
     keep_drawing(ui);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, egui::CornerRadius::same(14), egui::Color32::BLACK);
-    match view.texture(ui.ctx(), frames, VideoSource::Call(call)) {
+    let remote = if receiving { view.texture(ui.ctx(), frames, VideoSource::Call(call)) } else { None };
+    match remote {
         Some((texture, size)) => {
             let shown = fit(rect, size);
             painter.image(texture, shown, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
         None => {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Waiting for video…", egui::FontId::proportional(13.0), p.dim);
+            let text = if held {
+                "On hold"
+            } else if receiving {
+                "Waiting for video…"
+            } else {
+                "Their camera is off"
+            };
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(13.0), p.dim);
         }
     }
     // The camera in the bottom-right corner, a quarter of the width.
@@ -107,9 +130,9 @@ pub fn call_video(ui: &mut Ui, view: &mut VideoView, frames: &VideoFrames, p: &P
         response.on_hover_text(label).clicked()
     };
     let top = rect.top() + 26.0;
-    let (camera_icon, camera_label) = if sending { (Icon::Video, "Turn camera off") } else { (Icon::VideoOff, "Turn camera on") };
+    let (camera_icon, camera_label) = if camera_on { (Icon::Video, "Turn camera off") } else { (Icon::VideoOff, "Turn camera on") };
     if button(ui, pos2(rect.right() - 26.0, top), camera_icon, camera_label) {
-        action = Some(VideoAction::Camera(!sending));
+        action = Some(VideoAction::Camera(!camera_on));
     }
     let (fs_icon, fs_label) = if view.fullscreen { (Icon::Minimize, "Exit full screen") } else { (Icon::Maximize, "Full screen") };
     if button(ui, pos2(rect.right() - 70.0, top), fs_icon, fs_label) {

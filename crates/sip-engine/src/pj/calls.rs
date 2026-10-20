@@ -127,6 +127,8 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
             + Duration::from_millis(u64::try_from(ci.connect_duration.msec).unwrap_or(0)),
         remote_video: ci.rem_vid_cnt > 0,
         video: video_stream(ci).is_some(),
+        receiving_video: video_stream(ci).is_some_and(|v| v.decoder.is_some()),
+        sending_video: video_stream(ci).is_some_and(|v| v.dir & PJMEDIA_DIR_ENCODING != 0),
         camera_off: lock(&CAMERA_OFF).contains(&ci.id),
         sip_call_id: pj_to_string(&ci.call_id),
         caller_id: headers.caller_id,
@@ -135,14 +137,39 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
     }
 }
 
-/// The call's active video stream: its media index and decoder bridge slot.
-fn video_stream(ci: &pjsua_call_info) -> Option<(u32, pjsua_conf_port_id)> {
+/// A call's video stream in use, in either direction.
+struct VideoStream {
+    /// Negotiated direction: the peer may receive only (its camera off)
+    /// or send only.
+    dir: pjmedia_dir,
+    /// Bridge slot of the decoder, while we receive video.
+    decoder: Option<pjsua_conf_port_id>,
+}
+
+/// The call's video stream, if one is in use (held counts too).
+fn video_stream(ci: &pjsua_call_info) -> Option<VideoStream> {
     ci.media[..(ci.media_cnt as usize).min(ci.media.len())].iter().find_map(|m| {
-        let active = m.type_ == PJMEDIA_TYPE_VIDEO && m.status == PJSUA_CALL_MEDIA_ACTIVE;
+        let used = m.type_ == PJMEDIA_TYPE_VIDEO && !matches!(m.status, PJSUA_CALL_MEDIA_NONE | PJSUA_CALL_MEDIA_ERROR);
         // SAFETY: `vid` is the union member for video media.
         let slot = unsafe { m.stream.vid.dec_slot };
-        (active && slot != PJSUA_INVALID_ID).then_some((m.index, slot))
+        used.then(|| VideoStream { dir: m.dir, decoder: (slot != PJSUA_INVALID_ID).then_some(slot) })
     })
+}
+
+fn call_info_raw<T>(call_id: CallId, f: impl FnOnce(&pjsua_call_info) -> T) -> Option<T> {
+    let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
+    // SAFETY: filled on success and read in place.
+    unsafe {
+        if pjsua_call_get_info(call_id, info.as_mut_ptr()) != PJ_SUCCESS {
+            return None;
+        }
+        Some(f(info.assume_init_ref()))
+    }
+}
+
+/// Whether the call uses video in any direction.
+pub fn has_video(call_id: CallId) -> bool {
+    call_info_raw(call_id, |ci| video_stream(ci).is_some()).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +189,7 @@ pub fn set_accept_video(on: bool) {
 /// Answers a re-offer: video the peer adds is accepted, but our camera
 /// stays off until the user turns it on.
 pub fn on_reoffer(call_id: CallId, offer: *const pjmedia_sdp_session, opt: *mut pjsua_call_setting) {
-    if !ACCEPT_VIDEO.load(Ordering::SeqCst) || opt.is_null() || video_decoder_slot(call_id).is_some() || !offers_video(offer) {
+    if !ACCEPT_VIDEO.load(Ordering::SeqCst) || opt.is_null() || has_video(call_id) || !offers_video(offer) {
         return;
     }
     // SAFETY: pjsua passes a valid setting to fill in.
@@ -215,20 +242,13 @@ pub fn unused_video_index(call_id: CallId) -> Option<u32> {
     };
     ci.media[..(ci.media_cnt as usize).min(ci.media.len())]
         .iter()
-        .find(|m| m.type_ == PJMEDIA_TYPE_VIDEO && m.status != PJSUA_CALL_MEDIA_ACTIVE)
+        .find(|m| m.type_ == PJMEDIA_TYPE_VIDEO && matches!(m.status, PJSUA_CALL_MEDIA_NONE | PJSUA_CALL_MEDIA_ERROR))
         .map(|m| m.index)
 }
 
 /// The call's video decoder slot, for drawing its video.
 pub fn video_decoder_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
-    let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
-    // SAFETY: filled on success and read in place.
-    unsafe {
-        if pjsua_call_get_info(call_id, info.as_mut_ptr()) != PJ_SUCCESS {
-            return None;
-        }
-        video_stream(info.assume_init_ref()).map(|(_, slot)| slot)
-    }
+    call_info_raw(call_id, |ci| video_stream(ci).and_then(|v| v.decoder)).flatten()
 }
 
 fn media_state(status: pjsua_call_media_status) -> MediaState {
@@ -271,7 +291,7 @@ pub fn update_media(call_id: CallId) {
     let decoder = video_decoder_slot(call_id);
     // Video the peer added: stop our camera before encoding starts
     // (pjsua delays it after the media update).
-    if decoder.is_some() && lock(&PEER_ADDS_VIDEO).remove(&call_id)
+    if has_video(call_id) && lock(&PEER_ADDS_VIDEO).remove(&call_id)
         && let Err(e) = set_camera(call_id, false)
     {
         log::warn!("{e}");
