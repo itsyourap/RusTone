@@ -20,6 +20,7 @@ pub struct Settings {
     pub sip: SipSettings,
     pub calls: CallSettings,
     pub audio: AudioSettings,
+    pub features: FeatureSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -147,8 +148,26 @@ pub struct CallSettings {
     /// Dialled before a ringing contact's number to pick up its call;
     /// empty turns pickup off.
     pub pickup_code: String,
-    /// Turn text messages off: incoming ones are dropped.
-    pub disable_messaging: bool,
+}
+
+/// Features a provider may not support, each on unless turned off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FeatureSettings {
+    /// Contacts' presence (SUBSCRIBE). Off: nothing is subscribed and
+    /// presence isn't shown; contacts keep their presence choice.
+    pub presence: bool,
+    /// Text messages (MESSAGE). Off: the Messages page is hidden and incoming
+    /// messages are dropped.
+    pub messages: bool,
+    /// Call transfer (REFER). Off: the call screen has no Transfer button.
+    pub transfer: bool,
+}
+
+impl Default for FeatureSettings {
+    fn default() -> Self {
+        Self { presence: true, messages: true, transfer: true }
+    }
 }
 
 impl Default for CallSettings {
@@ -161,7 +180,6 @@ impl Default for CallSettings {
             bring_to_front: true,
             no_ignore: false,
             pickup_code: "**".into(),
-            disable_messaging: false,
         }
     }
 }
@@ -419,6 +437,13 @@ size = [400.0, 900.0]
 ").unwrap();
         tall.grow_window_to_default();
         assert_eq!(tall.ui.window.size, Some([400.0, 900.0]));
+    }
+
+    #[test]
+    fn features_default_on() {
+        assert_eq!(Settings::default().features, FeatureSettings { presence: true, messages: true, transfer: true });
+        let f = Settings::from_toml("[features]\npresence = false").unwrap().features;
+        assert!(!f.presence && f.messages && f.transfer);
     }
 
     #[test]

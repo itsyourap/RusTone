@@ -438,7 +438,9 @@ impl App {
             self.sip.send(sip_engine::Command::IpChanged);
         }
         self.sip.sync(&self.settings);
-        self.sip.set_buddies(self.phonebook.watched_numbers());
+        // Without the presence feature nothing is subscribed; contacts keep their choice.
+        let buddies = if self.settings.features.presence { self.phonebook.watched_numbers() } else { Vec::new() };
+        self.sip.set_buddies(buddies);
         let values = self.directory_values();
         let ready = matches!(self.sip.reg, sip_engine::RegState::Registered { .. } | sip_engine::RegState::NoRegistrar);
         let template = self.settings.sip.users_directory.clone();
@@ -463,7 +465,7 @@ impl App {
         }
         let own_hosts = self.own_hosts();
         for message in polled.messages {
-            if self.settings.calls.disable_messaging {
+            if !self.settings.features.messages {
                 continue;
             }
             let (number, name) = crate::phonebook::peer_for(&message.from, &own_hosts);

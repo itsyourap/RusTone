@@ -222,7 +222,7 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, r: &CallRecord, contact:
                     }
                 }
             }
-            if !app.settings.calls.disable_messaging && ui.button("Message").clicked() {
+            if app.settings.features.messages && ui.button("Message").clicked() {
                 app.ui.messages.open(&r.number);
                 app.ui.page = Page::Messages;
             }

@@ -189,10 +189,14 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
     let (mic_muted, speaker_muted) = (calls.mic_muted, calls.speaker_muted);
 
     let width = 3.0 * 76.0 + 2.0 * 12.0;
+    let transfer = app.settings.features.transfer;
     for row in 0..2 {
+        // Without call transfer the second row has two buttons, still centred.
+        let buttons = if row == 1 && !transfer { 2.0 } else { 3.0 };
+        let row_width = buttons * 76.0 + (buttons - 1.0) * 12.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
-            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            ui.add_space(((ui.available_width() - row_width) / 2.0).max(0.0));
             if row == 0 {
                 if control(ui, p, if mic_muted { Icon::MicOff } else { Icon::Mic }, if mic_muted { "Unmute" } else { "Mute" }, mic_muted, true) {
                     app.act(|c| c.toggle_mic());
@@ -207,7 +211,7 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
                 if control(ui, p, if held { Icon::Play } else { Icon::Pause }, if held { "Resume" } else { "Hold" }, held, confirmed) {
                     app.act(|c| c.toggle_hold(id));
                 }
-                if control(ui, p, Icon::Transfer, "Transfer", false, confirmed) {
+                if transfer && control(ui, p, Icon::Transfer, "Transfer", false, confirmed) {
                     app.ui.call_panel = CallPanel::Transfer { target: String::new() };
                 }
                 if control(ui, p, Icon::AddCall, "Add call", false, true) {

@@ -39,10 +39,6 @@ impl MessagesView {
 }
 
 pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
-    if app.settings.calls.disable_messaging {
-        widgets::empty_state(ui, p, Icon::Message, "Messages are off", "Turn text messages on in Settings › Calls.");
-        return;
-    }
     match app.ui.messages.open.clone() {
         Some(peer) => conversation(ui, app, p, &peer),
         None => list(ui, app, p),

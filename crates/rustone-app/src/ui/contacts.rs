@@ -125,11 +125,11 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
             // Subscribed presence, else what the users directory reports, which
             // applies to any contact with the number.
             let number = contact.number.trim();
-            let presence = contact
-                .presence
-                .then(|| app.sip.presence.get(number).cloned())
-                .flatten()
-                .or_else(|| app.directory.presence.get(number).cloned());
+            let presence = if app.settings.features.presence {
+                contact.presence.then(|| app.sip.presence.get(number).cloned()).flatten().or_else(|| app.directory.presence.get(number).cloned())
+            } else {
+                None
+            };
             let row = contact_row(ui, p, contact, presence.as_ref(), expanded);
             match row {
                 RowAction::None => {}
@@ -294,7 +294,7 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, c: &Contact, pickup: Opt
                 action = Some(RowAction::Call(number));
             }
         }
-        if !app.settings.calls.disable_messaging && ui.button("Message").clicked() {
+        if app.settings.features.messages && ui.button("Message").clicked() {
             app.ui.messages.open(c.number.trim());
             app.ui.page = Page::Messages;
         }
@@ -345,9 +345,12 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
         card(ui, p, |ui| {
             widgets::text_field(ui, p, "Name", "Shown in lists and calls", &mut c.name);
             widgets::text_field(ui, p, "Number", "Number, extension or SIP address to call", &mut c.number);
-            setting_row(ui, p, "Presence", Some("Show when this contact is busy or on the phone"), |ui| {
-                widgets::toggle(ui, p, &mut c.presence, "Presence");
-            });
+            // Hidden with the feature off; the saved choice is kept as it is.
+            if app.settings.features.presence {
+                setting_row(ui, p, "Presence", Some("Show when this contact is busy or on the phone"), |ui| {
+                    widgets::toggle(ui, p, &mut c.presence, "Presence");
+                });
+            }
             setting_row(ui, p, "Starred", Some("Listed first"), |ui| {
                 widgets::toggle(ui, p, &mut c.starred, "Starred");
             });

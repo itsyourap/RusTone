@@ -71,13 +71,26 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     changed |= widgets::toggle(ui, p, value, title).changed();
                 });
             }
-            let mut messaging = !calls.disable_messaging;
-            setting_row(ui, p, "Text messages", Some("Send and receive SIP messages"), |ui| {
-                if widgets::toggle(ui, p, &mut messaging, "Text messages").changed() {
-                    calls.disable_messaging = !messaging;
-                    changed = true;
-                }
-            });
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
+        section_title(ui, p, "Features");
+        card(ui, p, |ui| {
+            ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
+            let features = &mut app.settings.features;
+            let mut changed = false;
+            for (value, title, description) in [
+                (&mut features.presence, "Presence", "See when contacts are busy or on the phone (SUBSCRIBE)"),
+                (&mut features.messages, "Messages", "Send and receive text messages (MESSAGE)"),
+                (&mut features.transfer, "Call transfer", "Pass a call on to another number (REFER)"),
+            ] {
+                setting_row(ui, p, title, Some(description), |ui| {
+                    changed |= widgets::toggle(ui, p, value, title).changed();
+                });
+            }
             if changed {
                 app.mark_settings_dirty();
             }

@@ -71,6 +71,10 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(p.window).inner_margin(egui::Margin::symmetric(16, 8)))
         .show(ui, |ui| {
+            // A page whose feature was turned off isn't shown.
+            if matches!(app.ui.page, Page::Messages) && !app.settings.features.messages {
+                app.ui.page = Page::Dialer;
+            }
             let page = app.ui.page;
             let in_call_view = page == Page::Dialer && !app.ui.adding_call;
             // Elsewhere during a call, a bar leads back to it.
@@ -260,9 +264,11 @@ fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
         (Page::Contacts, Icon::Users, "Contacts"),
         (Page::Messages, Icon::Message, "Messages"),
     ];
+    let messages = app.settings.features.messages;
+    let tabs: Vec<_> = TABS.into_iter().filter(|(page, _, _)| messages || *page != Page::Messages).collect();
     let full = ui.max_rect();
-    let width = full.width() / TABS.len() as f32;
-    for (i, (page, icon, label)) in TABS.into_iter().enumerate() {
+    let width = full.width() / tabs.len() as f32;
+    for (i, (page, icon, label)) in tabs.into_iter().enumerate() {
         let rect = egui::Rect::from_min_size(egui::pos2(full.left() + width * i as f32, full.top()), vec2(width, full.height()));
         let response = ui.interact(rect, ui.id().with(label), Sense::click());
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, app.ui.page == page, label));
