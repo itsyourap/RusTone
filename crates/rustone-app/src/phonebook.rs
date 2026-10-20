@@ -61,6 +61,14 @@ impl Phonebook {
         }
     }
 
+    /// The numbers of contacts with presence on, without repeats.
+    pub fn watched_numbers(&self) -> Vec<String> {
+        let mut numbers: Vec<String> = self.contacts.iter().filter(|c| c.presence).map(|c| c.number.trim().to_owned()).filter(|n| !n.is_empty()).collect();
+        numbers.sort();
+        numbers.dedup();
+        numbers
+    }
+
     /// The contact a caller's number belongs to, for showing names.
     pub fn lookup(&self, number: &str) -> Option<&Contact> {
         rustone_core::contacts::find_by_number(&self.contacts, number)

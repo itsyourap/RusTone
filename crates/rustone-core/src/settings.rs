@@ -140,11 +140,22 @@ pub struct CallSettings {
     pub bring_to_front: bool,
     /// Closing the ringing screen declines instead of ignoring.
     pub no_ignore: bool,
+    /// Dialled before a ringing contact's number to pick up its call;
+    /// empty turns pickup off.
+    pub pickup_code: String,
 }
 
 impl Default for CallSettings {
     fn default() -> Self {
-        Self { dtmf_method: DtmfMethod::Auto, local_dtmf: true, call_waiting: true, max_concurrent_calls: 0, bring_to_front: true, no_ignore: false }
+        Self {
+            dtmf_method: DtmfMethod::Auto,
+            local_dtmf: true,
+            call_waiting: true,
+            max_concurrent_calls: 0,
+            bring_to_front: true,
+            no_ignore: false,
+            pickup_code: "**".into(),
+        }
     }
 }
 

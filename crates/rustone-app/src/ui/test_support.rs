@@ -20,6 +20,8 @@ pub fn harness<S: 'static>(size: [f32; 2], state: S, mut draw: impl FnMut(&mut e
         },
         state,
     );
-    harness.run();
+    // Fixed frames rather than `run`: animated widgets (a ringing contact)
+    // never settle.
+    harness.run_steps(2);
     harness
 }

@@ -314,6 +314,7 @@ impl App {
             self.sip.send(sip_engine::Command::IpChanged);
         }
         self.sip.sync(&self.settings);
+        self.sip.set_buddies(self.phonebook.watched_numbers());
         let polled = self.sip.poll(&self.settings);
         if !polled.ended.is_empty() {
             let own_hosts: Vec<String> = self

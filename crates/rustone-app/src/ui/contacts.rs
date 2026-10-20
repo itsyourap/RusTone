@@ -4,6 +4,7 @@
 use egui::{Sense, Ui, Vec2, vec2};
 use fastframe_fonts::Weight;
 use rustone_core::contacts::Contact;
+use sip_engine::{Presence, PresenceState};
 
 use super::widgets::{self, card, section_title, setting_row};
 use super::Page;
@@ -115,15 +116,19 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 
     let mut action: Option<(Contact, RowAction)> = None;
+    let pickup_code = app.settings.calls.pickup_code.trim().to_owned();
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         for contact in &shown {
             let expanded = app.ui.contacts.expanded == Some(contact.id);
-            let row = contact_row(ui, p, contact, expanded);
+            let presence = contact.presence.then(|| app.sip.presence.get(contact.number.trim()).cloned()).flatten();
+            let row = contact_row(ui, p, contact, presence.as_ref(), expanded);
             match row {
                 RowAction::None => {}
                 other => action = Some((contact.clone(), other)),
             }
-            if expanded && let Some(a) = row_actions(ui, app, p, contact) {
+            let ringing = presence.as_ref().is_some_and(|pr| pr.state == PresenceState::Ringing);
+            let pickup = (ringing && !pickup_code.is_empty()).then(|| pickup_number(&pickup_code, &contact.number));
+            if expanded && let Some(a) = row_actions(ui, app, p, contact, pickup) {
                 action = Some((contact.clone(), a));
             }
         }
@@ -148,21 +153,64 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
-fn contact_row(ui: &mut Ui, p: &Palette, c: &Contact, expanded: bool) -> RowAction {
+/// The presence dot's colour and words; `None` while unknown.
+fn presence_look(p: &Palette, state: PresenceState) -> Option<(egui::Color32, &'static str)> {
+    match state {
+        PresenceState::Unknown => None,
+        PresenceState::Offline => Some((p.dim, "Offline")),
+        PresenceState::Online => Some((p.success, "Online")),
+        PresenceState::Away => Some((p.warning, "Away")),
+        PresenceState::Busy => Some((p.danger, "Busy")),
+        PresenceState::OnThePhone => Some((p.danger, "On the phone")),
+        PresenceState::Ringing => Some((p.danger, "Ringing")),
+    }
+}
+
+/// Call pickup: the code in front of the user part (`**101`).
+fn pickup_number(code: &str, number: &str) -> String {
+    let n = number.trim();
+    let n = n.strip_prefix("sip:").unwrap_or(n);
+    format!("{code}{n}")
+}
+
+fn contact_row(ui: &mut Ui, p: &Palette, c: &Contact, presence: Option<&Presence>, expanded: bool) -> RowAction {
     let title = c.title();
+    let look = presence.and_then(|pr| presence_look(p, pr.state));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{title}, {}", c.number)));
+    let label = match look {
+        Some((_, words)) => format!("{title}, {}, {words}", c.number),
+        None => format!("{title}, {}", c.number),
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
     let hover = ui.ctx().animate_bool_with_time(response.id, response.hovered() || expanded, 0.12);
     if hover > 0.0 {
         ui.painter().rect_filled(rect, egui::CornerRadius::same(10), p.surface_hover.gamma_multiply(hover));
     }
     let avatar = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), Vec2::splat(36.0));
     widgets::avatar_at(ui, p, avatar, &title);
+    if let (Some(pr), Some((color, _))) = (presence, look) {
+        // Ringing blinks every 500 ms.
+        let lit = if pr.state == PresenceState::Ringing {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0
+        } else {
+            true
+        };
+        let dot = avatar.right_bottom() - vec2(5.0, 5.0);
+        ui.painter().circle_filled(dot, 6.5, p.window);
+        if lit {
+            ui.painter().circle_filled(dot, 4.5, color);
+        }
+    }
     let text_x = rect.left() + 54.0;
     let text_width = rect.right() - 44.0 - text_x;
     let name = widgets::elided(ui, title.clone(), Weight::Medium.font_id(14.0), p.text, text_width);
     ui.painter().galley(egui::pos2(text_x, rect.top() + 9.0), name, p.text);
-    let number = widgets::elided(ui, c.number.clone(), Weight::Regular.font_id(12.0), p.secondary, text_width);
+    let subtitle = match look {
+        Some((_, words)) => format!("{} · {words}", c.number),
+        None => c.number.clone(),
+    };
+    let number = widgets::elided(ui, subtitle, Weight::Regular.font_id(12.0), p.secondary, text_width);
     ui.painter().galley(egui::pos2(text_x, rect.top() + 29.0), number, p.secondary);
 
     let star_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 22.0, rect.center().y), Vec2::splat(34.0));
@@ -223,10 +271,15 @@ fn call_targets(c: &Contact) -> Vec<(String, String)> {
 }
 
 /// The expanded row's buttons.
-fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, c: &Contact) -> Option<RowAction> {
+fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, c: &Contact, pickup: Option<String>) -> Option<RowAction> {
     let mut action = None;
     // Lined up under the name, wrapping as needed.
     egui::Frame::new().inner_margin(egui::Margin { left: 54, right: 0, top: 2, bottom: 0 }).show(ui, |ui| ui.horizontal_wrapped(|ui| {
+        if let Some(number) = pickup
+            && ui.add(egui::Button::new(egui::RichText::new("Pick up").color(p.on_accent)).fill(p.warning)).on_hover_text(format!("Dial {number}")).clicked()
+        {
+            action = Some(RowAction::Call(number));
+        }
         for (label, number) in call_targets(c) {
             if ui.add(egui::Button::new(egui::RichText::new(label).color(p.on_accent)).fill(p.success)).clicked() {
                 action = Some(RowAction::Call(number));
@@ -403,6 +456,29 @@ mod tests {
         d.follow_fields();
         assert_eq!(d.contact.number, "sip:ada@pbx", "a typed number stays");
         assert_eq!(compose("Ada", "Ada"), "Ada");
+    }
+
+    #[test]
+    fn rows_show_presence() {
+        use egui_kittest::kittest::Queryable;
+        let ada = Contact { id: 1, name: "Ada".into(), number: "101".into(), presence: true, ..Contact::default() };
+        let ringing = Presence { number: "101".into(), state: PresenceState::Ringing, note: "Ringing".into() };
+        let harness = crate::ui::test_support::harness([400.0, 80.0], (), move |ui, _| {
+            contact_row(ui, &Palette::dark(), &ada, Some(&ringing), false);
+        });
+        harness.get_by_label("Ada, 101, Ringing");
+        let unknown = Presence { number: "101".into(), state: PresenceState::Unknown, note: String::new() };
+        let ada = Contact { id: 1, name: "Ada".into(), number: "101".into(), presence: true, ..Contact::default() };
+        let harness = crate::ui::test_support::harness([400.0, 80.0], (), move |ui, _| {
+            contact_row(ui, &Palette::dark(), &ada, Some(&unknown), false);
+        });
+        harness.get_by_label("Ada, 101");
+    }
+
+    #[test]
+    fn pickup_dials_the_code_before_the_number() {
+        assert_eq!(pickup_number("**", "101"), "**101");
+        assert_eq!(pickup_number("*8", "sip:101@pbx"), "*8101@pbx");
     }
 
     #[test]

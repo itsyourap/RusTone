@@ -23,6 +23,7 @@ struct Applied {
     devices: Option<AudioDevices>,
     levels: Option<Levels>,
     meters: Option<bool>,
+    buddies: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +76,8 @@ pub struct Sip {
     pub codecs: Vec<sip_engine::CodecInfo>,
     /// Sound devices the engine sees.
     pub audio_devices: Vec<AudioDevice>,
+    /// Watched contacts' presence, by the number they were subscribed with.
+    pub presence: std::collections::HashMap<String, sip_engine::Presence>,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
     meters: Arc<Meters>,
@@ -119,6 +122,7 @@ impl Sip {
             reg: RegState::Unregistered,
             codecs: Vec::new(),
             audio_devices: Vec::new(),
+            presence: std::collections::HashMap::new(),
             calls: CallBook::new(sounds),
         };
         sip.sync(settings);
@@ -137,6 +141,8 @@ impl Sip {
         }
         let account = settings.active().filter(|a| a.is_usable()).map(|a| account_config(a, &settings.sip));
         if self.applied.account.as_ref() != Some(&account) {
+            // The engine drops the old account's subscriptions.
+            self.presence.clear();
             engine.send(Command::SetAccount(account.clone()));
             self.applied.account = Some(account);
         }
@@ -166,6 +172,15 @@ impl Sip {
         if self.applied.local.as_ref() != Some(&local) {
             engine.send(Command::SetLocalAccount(local.clone()));
             self.applied.local = Some(local);
+        }
+    }
+
+    /// Watches these numbers' presence (sent only when the list changes).
+    pub fn set_buddies(&mut self, numbers: Vec<String>) {
+        if self.applied.buddies.as_ref() != Some(&numbers) {
+            self.presence.retain(|number, _| numbers.contains(number));
+            self.send(Command::SetBuddies(numbers.clone()));
+            self.applied.buddies = Some(numbers);
         }
     }
 
@@ -205,7 +220,13 @@ impl Sip {
                 Event::Started => self.engine_state = EngineState::Running,
                 Event::Codecs(codecs) => self.codecs = codecs,
                 Event::AudioDevices(devices) => self.audio_devices = devices,
-                Event::Stopped => self.engine_state = EngineState::Stopped,
+                Event::Presence(p) => {
+                    self.presence.insert(p.number.clone(), p);
+                }
+                Event::Stopped => {
+                    self.engine_state = EngineState::Stopped;
+                    self.presence.clear();
+                }
                 Event::Failed(e) => self.engine_state = EngineState::Failed(e),
                 Event::Registration(state) => {
                     match &state {
