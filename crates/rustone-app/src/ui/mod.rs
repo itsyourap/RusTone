@@ -143,7 +143,7 @@ fn notice(ui: &mut Ui, app: &App, p: &Palette) {
 
 /// Places a call from the dialer. Uses the local account for IP addresses
 /// when it's on, or when there's no usable main account.
-fn dial(app: &mut App, target: &str, video: bool) {
+pub(crate) fn dial(app: &mut App, target: &str, video: bool) {
     let target = target.trim();
     if target.is_empty() {
         return;

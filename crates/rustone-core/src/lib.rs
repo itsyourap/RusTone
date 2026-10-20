@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod codecs;
+pub mod command;
 pub mod contacts;
 pub mod dialplan;
 pub mod directory;

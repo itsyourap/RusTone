@@ -22,6 +22,7 @@ use std::process::ExitCode;
 
 use fastframe_instance::{Claim, Slot};
 use fastframe_shell::{Shell, Waker};
+use rustone_core::command::Verb;
 use rustone_core::settings::{self, Settings};
 
 use crate::app::{App, Paths, Request, Requests};
@@ -64,20 +65,31 @@ fn rename_old_folders() -> (Vec<PathBuf>, Vec<String>) {
 struct Args {
     /// Start in the tray.
     minimized: bool,
+    /// What the rest of the command line asks for: a number or link to
+    /// dial, or a verb (`/answer`, `msip:hold`…).
+    verb: Option<Verb>,
+    /// That command line, to hand to a running copy.
+    command: String,
 }
 
 impl Args {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
         let mut out = Self::default();
+        let mut rest = Vec::new();
         for arg in args {
             match arg.to_ascii_lowercase().as_str() {
                 "--minimized" | "/minimized" | "-m" => out.minimized = true,
-                _ => {}
+                _ => rest.push(arg),
             }
         }
+        out.command = rest.join(" ");
+        out.verb = rustone_core::command::parse(&out.command);
         out
     }
 }
+
+/// Prefix of a request carrying a command line to the running copy.
+const COMMAND: &str = "cmd ";
 
 fn main() -> ExitCode {
     let args = Args::parse(std::env::args().skip(1));
@@ -93,20 +105,37 @@ fn main() -> ExitCode {
         slot = slot.scoped(&scope);
     }
     let (handler_requests, handler_waker) = (requests.clone(), waker.clone());
-    let request = if args.minimized { "ping" } else { "show" };
-    let _instance = match slot.claim(request, move |request| match request {
-        "show" => {
-            handler_requests.lock().unwrap_or_else(|e| e.into_inner()).push(Request::Show);
+    let request = match &args.verb {
+        Some(_) => format!("{COMMAND}{}", args.command),
+        None if args.minimized => "ping".to_owned(),
+        None => "show".to_owned(),
+    };
+    let _instance = match slot.claim(&request, move |request| {
+        let push = |r: Request| {
+            handler_requests.lock().unwrap_or_else(|e| e.into_inner()).push(r);
             handler_waker.wake();
-            Some("ok".to_owned())
+        };
+        match request {
+            "show" => push(Request::Show),
+            "ping" => {}
+            _ => match request.strip_prefix(COMMAND).and_then(rustone_core::command::parse) {
+                Some(verb) => push(Request::Verb(verb)),
+                None => return None,
+            },
         }
-        "ping" => Some("ok".to_owned()),
-        _ => None,
+        Some("ok".to_owned())
     }) {
         Claim::First(guard) => guard,
         Claim::Running(_) | Claim::Declined => return ExitCode::SUCCESS,
         Claim::Unanswered => return ExitCode::FAILURE,
     };
+    // Nothing is running: call verbs have nothing to act on;
+    // a number or link is dialled once the app is up.
+    match args.verb {
+        Some(Verb::Exit | Verb::Answer | Verb::HangupAll | Verb::HangupIncoming) => return ExitCode::SUCCESS,
+        Some(verb) => requests.lock().unwrap_or_else(|e| e.into_inner()).push(Request::Verb(verb)),
+        None => {}
+    }
 
     let found = DIRS.discover(|_, _| Ok(()));
     let dirs = found.dirs.unwrap_or_else(fallback_dirs);

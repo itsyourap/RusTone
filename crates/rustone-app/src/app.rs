@@ -63,6 +63,8 @@ pub enum Request {
     ShowCalls,
     /// A message notification was clicked: open that conversation.
     ShowConversation(String),
+    /// A launch with arguments or a link (`msip:`, `sip:`, `tel:`…).
+    Verb(rustone_core::command::Verb),
 }
 
 pub type Requests = Arc<Mutex<Vec<Request>>>;
@@ -216,6 +218,81 @@ impl App {
     pub fn reopen_window(&mut self, ctx: &egui::Context) {
         self.next = Closed::Reopen;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Acts on a command-line verb. Returns true
+    /// when the window should come forward.
+    fn run_verb(&mut self, verb: rustone_core::command::Verb, ctx: Option<&egui::Context>) -> bool {
+        use rustone_core::command::Verb;
+        let calls = &self.sip.calls;
+        let current = calls.current;
+        let ringing: Vec<_> = calls.visible().filter(|c| c.is_ringing_in()).map(crate::calls::Call::id).collect();
+        match verb {
+            Verb::Dial(target) => {
+                self.ui.page = crate::ui::Page::Dialer;
+                crate::ui::dial(self, &target, false);
+                return true;
+            }
+            Verb::Answer => {
+                if let Some(&id) = ringing.first() {
+                    self.act(|c| c.answer(id, false));
+                }
+            }
+            Verb::HangupAll => {
+                // Hanging up all but incoming: ringing calls stay.
+                let ids: Vec<_> = calls.visible().filter(|c| c.is_live() && !c.is_ringing_in()).map(crate::calls::Call::id).collect();
+                self.sip.run(ids.into_iter().map(sip_engine::Command::Hangup).collect());
+            }
+            Verb::HangupIncoming => {
+                for id in ringing {
+                    self.act(|c| c.decline(id));
+                }
+            }
+            Verb::Hold => {
+                if let Some(id) = current {
+                    self.act(|c| c.toggle_hold(id));
+                }
+            }
+            Verb::Transfer(target) => {
+                if let Some(id) = current
+                    && let Ok(target) = self.format_number(&target)
+                {
+                    let cfg = self.settings.calls.clone();
+                    self.act(|c| c.transfer(id, &target, &cfg));
+                }
+            }
+            Verb::MicMute(want) => {
+                if want.is_none_or(|w| w != self.sip.calls.mic_muted) {
+                    self.act(crate::calls::CallBook::toggle_mic);
+                }
+            }
+            Verb::SpeakerMute(want) => {
+                if want.is_none_or(|w| w != self.sip.calls.speaker_muted) {
+                    self.act(crate::calls::CallBook::toggle_speaker);
+                }
+            }
+            Verb::MicLevel(step) => {
+                let level = &mut self.settings.audio.volume_input;
+                *level = level.saturating_add_signed(step).min(100);
+                self.mark_settings_dirty();
+            }
+            Verb::SpeakerLevel(step) => {
+                let level = &mut self.settings.audio.volume_output;
+                *level = level.saturating_add_signed(step).min(100);
+                self.mark_settings_dirty();
+            }
+            Verb::Minimize => {
+                if let Some(ctx) = ctx {
+                    if self.can_hide() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    } else {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+                }
+            }
+            Verb::Exit => self.quit(ctx),
+        }
+        false
     }
 
     pub fn quit(&mut self, ctx: Option<&egui::Context>) {
@@ -588,6 +665,7 @@ impl App {
                     self.ui.messages.open = Some(peer);
                     self.ui.adding_call = false;
                 }
+                Request::Verb(verb) => show |= self.run_verb(verb, ctx),
                 Request::ShowCalls => {
                     show = true;
                     self.ui.page = crate::ui::Page::Calls;
