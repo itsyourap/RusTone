@@ -103,6 +103,8 @@ pub struct App {
     media_keys: Option<crate::media_keys::MediaKeys>,
     /// The USB headset worker, while headsets are on.
     headset: Option<crate::headset::Headset>,
+    /// The recent numbers last put in the taskbar jump list.
+    jump_list: Option<Vec<(String, String)>>,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -184,6 +186,7 @@ impl App {
             net: NetWatch::spawn(move || net_wake.wake()),
             media_keys: None,
             headset: None,
+            jump_list: None,
             start_at_login: {
                 let wake = waker.clone();
                 let start = crate::autostart::StartAtLogin::new(move || wake.wake());
@@ -293,6 +296,45 @@ impl App {
             }
         }
         raise
+    }
+
+    /// The taskbar jump list: recent numbers to
+    /// call, and Hang up all calls and Exit tasks. Rebuilt off the UI thread
+    /// when the recent numbers change.
+    fn update_jump_list(&mut self) {
+        const RECENT: usize = 8;
+        let mut recent: Vec<(String, String)> = Vec::new();
+        for record in &self.phonebook.calls {
+            let number = record.number.trim();
+            if number.is_empty() || recent.iter().any(|(n, _)| n == number) {
+                continue;
+            }
+            let name = self.phonebook.lookup(number).map(rustone_core::contacts::Contact::title).unwrap_or_else(|| record.name.clone());
+            let title = if name.trim().is_empty() || name == number { number.to_owned() } else { format!("{name} ({number})") };
+            recent.push((number.to_owned(), title));
+            if recent.len() == RECENT {
+                break;
+            }
+        }
+        if self.jump_list.as_ref() == Some(&recent) {
+            return;
+        }
+        self.jump_list = Some(recent.clone());
+        let Ok(exe) = std::env::current_exe() else { return };
+        let spawned = std::thread::Builder::new().name("jumplist".into()).spawn(move || {
+            use rustone_win::Link;
+            let tasks = [
+                Link { title: "Hang up all calls".into(), arguments: "/hangupall".into() },
+                Link { title: "Exit RusTone".into(), arguments: "/exit".into() },
+            ];
+            let recent: Vec<Link> = recent.into_iter().map(|(number, title)| Link { title, arguments: number }).collect();
+            if let Err(e) = rustone_win::set_jump_list(&exe, &tasks, "Recent calls", &recent) {
+                log::warn!("cannot set the jump list: {e}");
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("cannot set the jump list: {e}");
+        }
     }
 
     /// A USB headset's buttons and lights.
@@ -788,6 +830,7 @@ impl App {
         }
         show |= self.media_keys();
         self.headset();
+        self.update_jump_list();
         let requests = std::mem::take(&mut *self.requests.lock().unwrap_or_else(|e| e.into_inner()));
         for request in requests {
             match request {

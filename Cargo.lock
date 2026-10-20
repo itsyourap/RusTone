@@ -2389,6 +2389,7 @@ dependencies = [
  "hidapi",
  "if-addrs",
  "rustone-core",
+ "rustone-win",
  "jiff",
  "log",
  "realfft",
@@ -2426,6 +2427,13 @@ dependencies = [
  "serde_json",
  "toml 0.9.12+spec-1.1.0",
  "windows-native-keyring-store",
+]
+
+[[package]]
+name = "rustone-win"
+version = "0.1.0"
+dependencies = [
+ "windows 0.62.2",
 ]
 
 [[package]]
