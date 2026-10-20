@@ -60,6 +60,8 @@ pub enum Request {
     Show,
     /// A missed-call notification was clicked.
     ShowCalls,
+    /// A message notification was clicked: open that conversation.
+    ShowConversation(String),
 }
 
 pub type Requests = Arc<Mutex<Vec<Request>>>;
@@ -82,6 +84,8 @@ pub struct App {
     notifier: Option<fastframe_notifications::Client>,
     /// The latest missed-call toast, replaced by the next.
     missed_toast: Option<fastframe_notifications::Handle>,
+    /// The latest message toast per conversation.
+    message_toasts: std::collections::HashMap<String, fastframe_notifications::Handle>,
     waker: Waker,
     /// The missed-call count on the window's taskbar button.
     taskbar: fastframe_dock::Taskbar,
@@ -133,6 +137,8 @@ impl App {
                     ringback: files.path(Sound::Ringback),
                     call_waiting: files.path(Sound::CallWaiting),
                     hangup: files.path(Sound::Hangup),
+                    message_in: files.path(Sound::MessageIn),
+                    message_out: files.path(Sound::MessageOut),
                 }
             }
             Err(e) => {
@@ -158,6 +164,7 @@ impl App {
             missed: 0,
             notifier: notifier(),
             missed_toast: None,
+            message_toasts: std::collections::HashMap::new(),
             waker: waker.clone(),
             taskbar: fastframe_dock::Taskbar::default(),
             secrets,
@@ -238,6 +245,53 @@ impl App {
         }
     }
 
+    /// Plays a message sound, unless a call is up (it would cut off the
+    /// ringtone or ringback).
+    fn message_sound(&self, incoming: bool) {
+        if self.sip.calls.has_calls() {
+            return;
+        }
+        let sounds = &self.sip.calls.sounds;
+        let path = if incoming { sounds.message_in.clone() } else { sounds.message_out.clone() };
+        let level = self.sip.calls.ring_level;
+        self.sip.send(sip_engine::Command::PlaySound(sip_engine::Sound { path, looping: false, level, ring: true }));
+    }
+
+    /// A message for `peer`: the sound (for every message)
+    /// and a notification per conversation, unless it's on screen.
+    fn message_arrived(&mut self, peer: &str, who: &str, text: &str) {
+        let on_screen = self.ui.page == crate::ui::Page::Messages
+            && self.ui.messages.seen.as_ref().is_some_and(|(seen, at)| seen == peer && at.elapsed() < Duration::from_millis(1500));
+        if on_screen {
+            return;
+        }
+        self.message_sound(true);
+        let Some(client) = &self.notifier else { return };
+        let preview: String = text.chars().take(200).collect();
+        let toast = fastframe_notifications::Notification::new(format!("Message from {who}")).body(preview).key(format!("message-{peer}"));
+        let (requests, waker, peer_owned) = (self.requests.clone(), self.waker.clone(), peer.to_owned());
+        match client.show_with(toast, move |event| {
+            if event == fastframe_notifications::Event::Activated {
+                requests.lock().unwrap_or_else(|e| e.into_inner()).push(Request::ShowConversation(peer_owned.clone()));
+                waker.wake();
+            }
+        }) {
+            Ok(handle) => {
+                self.message_toasts.insert(peer.to_owned(), handle);
+            }
+            Err(e) => log::warn!("cannot show the message notification: {e}"),
+        }
+    }
+
+    /// A conversation is on screen: its notification goes.
+    pub fn conversation_seen(&mut self, peer: &str) {
+        if self.message_toasts.remove(peer).is_some()
+            && let Some(client) = &self.notifier
+        {
+            let _ = client.withdraw(format!("message-{peer}"));
+        }
+    }
+
     /// The Calls page is open: missed calls have been seen.
     pub fn missed_seen(&mut self) {
         if self.missed > 0 {
@@ -282,6 +336,10 @@ impl App {
         };
         let id = self.phonebook.add_message(&record);
         self.dispatch_message(id, &peer, text);
+        // Played with sound events on.
+        if self.settings.calls.local_dtmf {
+            self.message_sound(false);
+        }
         peer
     }
 
@@ -409,9 +467,16 @@ impl App {
                 continue;
             }
             let (number, name) = crate::phonebook::peer_for(&message.from, &own_hosts);
+            let peer = crate::phonebook::conversation_key(&number);
+            let who = match self.phonebook.lookup(&peer) {
+                Some(contact) => contact.title(),
+                None if !name.is_empty() => name.clone(),
+                None => number.clone(),
+            };
+            self.message_arrived(&peer, &who, &message.text);
             let record = rustone_core::messages::MessageRecord {
                 id: 0,
-                peer: crate::phonebook::conversation_key(&number),
+                peer,
                 name,
                 outgoing: false,
                 time: jiff::Timestamp::now().as_second(),
@@ -473,6 +538,12 @@ impl App {
         for request in requests {
             match request {
                 Request::Show => show = true,
+                Request::ShowConversation(peer) => {
+                    show = true;
+                    self.ui.page = crate::ui::Page::Messages;
+                    self.ui.messages.open = Some(peer);
+                    self.ui.adding_call = false;
+                }
                 Request::ShowCalls => {
                     show = true;
                     self.ui.page = crate::ui::Page::Calls;

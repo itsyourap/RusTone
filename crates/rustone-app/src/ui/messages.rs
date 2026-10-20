@@ -182,6 +182,7 @@ fn conversation(ui: &mut Ui, app: &mut App, p: &Palette, peer: &str) {
     }
     app.phonebook.mark_read(peer);
     app.ui.messages.seen = Some((peer.to_owned(), Instant::now()));
+    app.conversation_seen(peer);
     let messages = app.ui.messages.cache.as_ref().map(|(_, _, m)| m.clone()).unwrap_or_default();
     let name = messages.iter().rev().find(|m| !m.name.is_empty()).map(|m| m.name.clone()).unwrap_or_default();
     let title = title(app, peer, &name);

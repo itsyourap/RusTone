@@ -21,6 +21,8 @@ pub struct SoundPaths {
     pub ringback: PathBuf,
     pub call_waiting: PathBuf,
     pub hangup: PathBuf,
+    pub message_in: PathBuf,
+    pub message_out: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -568,6 +570,8 @@ mod tests {
             ringback: "back.wav".into(),
             call_waiting: "wait.wav".into(),
             hangup: "hang.wav".into(),
+            message_in: "in.wav".into(),
+            message_out: "out.wav".into(),
         })
     }
 
