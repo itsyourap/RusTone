@@ -87,8 +87,9 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                 Page::Dialer if app.sip.calls.has_calls() && !app.ui.adding_call => call::show(ui, app, &p),
                 Page::Dialer => {
                     let can_call = app.status().is_online() || app.settings.local_account.enabled;
-                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call) {
-                        Some(dialer::Action::Call(target)) => dial(app, &target),
+                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call, app.settings.features.video) {
+                        Some(dialer::Action::Call(target)) => dial(app, &target, false),
+                        Some(dialer::Action::VideoCall(target)) => dial(app, &target, true),
                         Some(dialer::Action::Key(digit)) => app.sip.send(sip_engine::Command::PlayLocalDigits(digit)),
                         None => {}
                     }
@@ -128,13 +129,14 @@ fn notice(ui: &mut Ui, app: &App, p: &Palette) {
 
 /// Places a call from the dialer. Uses the local account for IP addresses
 /// when it's on, or when there's no usable main account.
-fn dial(app: &mut App, target: &str) {
+fn dial(app: &mut App, target: &str, video: bool) {
     let target = target.trim();
     if target.is_empty() {
         return;
     }
     let local = app.use_local_account(target);
-    app.act(|c| c.dial(target, local));
+    let video = video && app.settings.features.video;
+    app.act(|c| c.dial(target, local, video));
     app.ui.adding_call = false;
     app.ui.call_panel = call::CallPanel::None;
 }

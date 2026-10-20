@@ -21,6 +21,7 @@ pub struct Settings {
     pub calls: CallSettings,
     pub audio: AudioSettings,
     pub features: FeatureSettings,
+    pub video: VideoSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -162,12 +163,25 @@ pub struct FeatureSettings {
     pub messages: bool,
     /// Call transfer (REFER). Off: the call screen has no Transfer button.
     pub transfer: bool,
+    /// Video calls. Off: no video is offered or accepted and the video
+    /// buttons are hidden.
+    pub video: bool,
 }
 
 impl Default for FeatureSettings {
     fn default() -> Self {
-        Self { presence: true, messages: true, transfer: true }
+        Self { presence: true, messages: true, transfer: true, video: true }
     }
+}
+
+/// Camera and bitrate.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VideoSettings {
+    /// Camera name as pjsua reports it; empty for the default camera.
+    pub camera: String,
+    /// H.264 bitrate in kbit/s; 0 keeps the codec's default.
+    pub bitrate_kbps: u32,
 }
 
 impl Default for CallSettings {
@@ -441,7 +455,7 @@ size = [400.0, 900.0]
 
     #[test]
     fn features_default_on() {
-        assert_eq!(Settings::default().features, FeatureSettings { presence: true, messages: true, transfer: true });
+        assert_eq!(Settings::default().features, FeatureSettings { presence: true, messages: true, transfer: true, video: true });
         let f = Settings::from_toml("[features]\npresence = false").unwrap().features;
         assert!(!f.presence && f.messages && f.transfer);
     }

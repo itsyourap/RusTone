@@ -150,15 +150,24 @@ fn avatar(ui: &mut Ui, p: &Palette, title: &str, size: f32) {
 
 fn ringing_controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
     ui.add_space(24.0);
+    // "Answer with Video" when the caller offers video.
+    let video = call.info.remote_video && app.settings.features.video;
     ui.horizontal(|ui| {
-        let gap = 72.0;
-        ui.add_space(((ui.available_width() - 2.0 * 68.0 - gap) / 2.0).max(0.0));
+        let gap = if video { 36.0 } else { 72.0 };
+        let buttons = if video { 3.0 } else { 2.0 };
+        ui.add_space(((ui.available_width() - buttons * 68.0 - (buttons - 1.0) * gap) / 2.0).max(0.0));
         if widgets::round_icon_button(ui, 68.0, p.danger, Icon::PhoneOff, p.on_accent, "Decline").clicked() {
             app.act(|c| c.decline(call.id()));
         }
         ui.add_space(gap);
+        if video {
+            if widgets::round_icon_button(ui, 68.0, p.success, Icon::Video, p.on_accent, "Answer with video").clicked() {
+                app.act(|c| c.answer(call.id(), true));
+            }
+            ui.add_space(gap);
+        }
         if widgets::round_icon_button(ui, 68.0, p.success, Icon::Phone, p.on_accent, "Answer").clicked() {
-            app.act(|c| c.answer(call.id()));
+            app.act(|c| c.answer(call.id(), false));
         }
     });
     ui.add_space(16.0);

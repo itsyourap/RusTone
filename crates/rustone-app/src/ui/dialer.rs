@@ -41,6 +41,7 @@ pub struct DialerState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Call(String),
+    VideoCall(String),
     /// A keypad key, for local tone feedback.
     Key(String),
 }
@@ -51,7 +52,7 @@ fn allowed(c: char) -> bool {
     c.is_ascii_alphanumeric() || "*#+@.:-_;=".contains(c)
 }
 
-pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool) -> Option<Action> {
+pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool, video: bool) -> Option<Action> {
     let mut action = None;
 
     ui.with_layout(Layout::top_down(Align::Center), |ui| {
@@ -84,9 +85,11 @@ pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool)
             centre_row(ui, 3);
             let reason = if registered { "" } else { " (not connected)" };
             ui.add_enabled_ui(registered && !state.number.is_empty(), |ui| {
-                // Video calls arrive in Phase 7.
-                ui.add_enabled_ui(false, |ui| {
-                    widgets::round_icon_button(ui, KEY_SIZE, p.surface, Icon::Video, p.text, "Video call (coming later)");
+                ui.add_enabled_ui(video, |ui| {
+                    let label = if video { format!("Video call{reason}") } else { "Video calls are off in Settings".to_owned() };
+                    if widgets::round_icon_button(ui, KEY_SIZE, p.surface, Icon::Video, p.text, &label).clicked() {
+                        action = Some(Action::VideoCall(state.number.clone()));
+                    }
                 });
                 if widgets::round_icon_button(ui, KEY_SIZE, p.success, Icon::Phone, p.on_accent, &format!("Call{reason}")).clicked() {
                     action = Some(Action::Call(state.number.clone()));
@@ -279,7 +282,7 @@ mod tests {
     /// The dialer in a test harness, with the app's fonts and icons.
     fn dialer_harness() -> egui_kittest::Harness<'static, DialerState> {
         crate::ui::test_support::harness([475.0, 760.0], DialerState::default(), |ui, state| {
-            show(ui, &Palette::dark(), state, true);
+            show(ui, &Palette::dark(), state, true, true);
         })
     }
 

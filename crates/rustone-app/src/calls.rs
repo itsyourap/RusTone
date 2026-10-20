@@ -421,15 +421,16 @@ impl CallBook {
     // -----------------------------------------------------------------------
     // User actions
 
-    pub fn dial(&self, target: &str, local: bool) -> Vec<Command> {
-        vec![Command::MakeCall { target: target.to_owned(), video: false, local }]
+    pub fn dial(&self, target: &str, local: bool, video: bool) -> Vec<Command> {
+        vec![Command::MakeCall { target: target.to_owned(), video, local }]
     }
 
-    pub fn answer(&mut self, id: CallId) -> Vec<Command> {
+    /// Answers a ringing call, with video when `video`.
+    pub fn answer(&mut self, id: CallId, video: bool) -> Vec<Command> {
         let Some(call) = self.get(id).filter(|c| c.is_ringing_in()) else { return Vec::new() };
         self.handled_sip_ids.push(call.info.sip_call_id.clone());
         self.current = Some(id);
-        let mut commands = vec![Command::Answer { call: id, code: 200, video: false }];
+        let mut commands = vec![Command::Answer { call: id, code: 200, video }];
         if matches!(self.playing, Some(Playing::Ringtone | Playing::OneShot)) {
             commands.push(self.stop());
         }
@@ -653,7 +654,7 @@ mod tests {
         let out = b.on_event(&Event::IncomingCall(info(2, Direction::Incoming, CallState::Incoming, "<sip:100@pbx;x=y>")), &cfg);
         assert_eq!(answers(&out), [486]);
 
-        b.answer(1);
+        b.answer(1, false);
         let mut fork = info(5, Direction::Incoming, CallState::Incoming, "<sip:999@pbx>");
         fork.sip_call_id = "sip-1".into();
         let out = b.on_event(&Event::IncomingCall(fork), &cfg);
@@ -711,7 +712,7 @@ mod tests {
         assert_eq!(b.decline(1).first(), Some(&Command::Answer { call: 1, code: 486, video: false }));
 
         b.on_event(&Event::IncomingCall(info(2, Direction::Incoming, CallState::Incoming, "<sip:200@pbx>")), &cfg);
-        let cmds = b.answer(2);
+        let cmds = b.answer(2, false);
         assert_eq!(cmds, [Command::Answer { call: 2, code: 200, video: false }, Command::StopSound]);
         let strict = CallSettings { no_ignore: true, ..cfg };
         b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &strict);

@@ -42,6 +42,7 @@ pub struct HistoryView {
 enum RowAction {
     Toggle,
     Call(String),
+    VideoCall(String),
 }
 
 pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
@@ -125,7 +126,11 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     match action {
         Some((id, RowAction::Toggle)) => app.ui.history.expanded = if app.ui.history.expanded == Some(id) { None } else { Some(id) },
         Some((_, RowAction::Call(number))) => {
-            super::dial(app, &number);
+            super::dial(app, &number, false);
+            app.ui.page = Page::Dialer;
+        }
+        Some((_, RowAction::VideoCall(number))) => {
+            super::dial(app, &number, true);
             app.ui.page = Page::Dialer;
         }
         None => {}
@@ -221,6 +226,9 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, r: &CallRecord, contact:
                         app.ui.page = Page::Contact;
                     }
                 }
+            }
+            if app.settings.features.video && ui.button("Video call").clicked() {
+                action = Some(RowAction::VideoCall(r.number.clone()));
             }
             if app.settings.features.messages && ui.button("Message").clicked() {
                 app.ui.messages.open(&r.number);

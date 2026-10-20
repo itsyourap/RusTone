@@ -68,6 +68,7 @@ enum RowAction {
     None,
     Toggle,
     Call(String),
+    VideoCall(String),
     Star,
 }
 
@@ -149,7 +150,11 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
             app.ui.contacts.confirm_delete = None;
         }
         Some((_, RowAction::Call(number))) => {
-            super::dial(app, &number);
+            super::dial(app, &number, false);
+            app.ui.page = Page::Dialer;
+        }
+        Some((_, RowAction::VideoCall(number))) => {
+            super::dial(app, &number, true);
             app.ui.page = Page::Dialer;
         }
         Some((mut c, RowAction::Star)) => {
@@ -293,6 +298,9 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, c: &Contact, pickup: Opt
             if ui.add(egui::Button::new(egui::RichText::new(label).color(p.on_accent)).fill(p.success)).clicked() {
                 action = Some(RowAction::Call(number));
             }
+        }
+        if app.settings.features.video && ui.button("Video call").clicked() {
+            action = Some(RowAction::VideoCall(c.number.trim().to_owned()));
         }
         if app.settings.features.messages && ui.button("Message").clicked() {
             app.ui.messages.open(c.number.trim());

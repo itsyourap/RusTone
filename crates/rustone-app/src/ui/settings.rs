@@ -22,6 +22,12 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         audio_devices(ui, app, p);
         ui.add_space(12.0);
 
+        if app.settings.features.video {
+            section_title(ui, p, "Video");
+            video(ui, app, p);
+            ui.add_space(12.0);
+        }
+
         section_title(ui, p, "Audio codecs");
         codecs(ui, app, p);
         ui.add_space(12.0);
@@ -86,6 +92,7 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                 (&mut features.presence, "Presence", "See when contacts are busy or on the phone (SUBSCRIBE)"),
                 (&mut features.messages, "Messages", "Send and receive text messages (MESSAGE)"),
                 (&mut features.transfer, "Call transfer", "Pass a call on to another number (REFER)"),
+                (&mut features.video, "Video calls", "Make and answer calls with video"),
             ] {
                 setting_row(ui, p, title, Some(description), |ui| {
                     changed |= widgets::toggle(ui, p, value, title).changed();
@@ -335,6 +342,48 @@ fn processing(ui: &mut Ui, app: &mut App, p: &Palette, available: &[String]) {
     if stereo && sip.ec {
         ui.label(egui::RichText::new("Echo cancellation turns the stereo codecs mono.").size(12.0).color(p.warning));
     }
+    if changed {
+        app.mark_settings_dirty();
+    }
+}
+
+/// Camera, bitrate and a preview. Changes apply
+/// when the engine restarts, once no call is live.
+fn video(ui: &mut Ui, app: &mut App, p: &Palette) {
+    let cameras: Vec<String> = app.sip.video_devices.iter().filter(|d| d.capture).map(|d| d.name.clone()).collect();
+    let mut changed = false;
+    card(ui, p, |ui| {
+        setting_stack(ui, p, "Camera", None, |ui| {
+            let camera = &mut app.settings.video.camera;
+            let missing = !camera.is_empty() && !cameras.contains(camera) && !cameras.is_empty();
+            let selected = match (camera.is_empty(), missing) {
+                (true, _) => "System default".to_owned(),
+                (false, true) => format!("{camera} (not connected)"),
+                (false, false) => camera.clone(),
+            };
+            let combo = egui::ComboBox::from_id_salt("camera").width(ui.available_width()).selected_text(selected).truncate().show_ui(ui, |ui| {
+                changed |= ui.selectable_value(camera, String::new(), "System default").changed();
+                for name in &cameras {
+                    changed |= ui.selectable_value(camera, name.clone(), name).changed();
+                }
+            });
+            ui.ctx().accesskit_node_builder(combo.response.id, |node| node.set_label("Camera"));
+        });
+        ui.separator();
+        changed |= widgets::number_field(ui, p, "Bitrate (kbit/s)", &mut app.settings.video.bitrate_kbps, 0..=8000, " kbit/s").changed();
+        ui.label(egui::RichText::new("0 keeps H.264's default (256 kbit/s).").size(12.0).color(p.dim));
+        ui.separator();
+        setting_row(ui, p, "Preview", Some("Show the camera in its own window"), |ui| {
+            let label = if app.sip.preview { "Stop" } else { "Show" };
+            if ui.button(label).clicked() {
+                app.sip.preview = !app.sip.preview;
+                app.sip.send(sip_engine::Command::SetPreview(app.sip.preview));
+            }
+        });
+        if app.sip.calls.live_count() > 0 {
+            ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
+        }
+    });
     if changed {
         app.mark_settings_dirty();
     }

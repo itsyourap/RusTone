@@ -203,7 +203,7 @@ fn conversation(ui: &mut Ui, app: &mut App, p: &Palette, peer: &str) {
         });
     });
     if call {
-        super::dial(app, peer);
+        super::dial(app, peer, false);
         app.ui.page = Page::Dialer;
         return;
     }

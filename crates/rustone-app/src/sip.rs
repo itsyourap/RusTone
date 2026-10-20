@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use fastframe_shell::Waker;
 use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
-use rustone_core::settings::{AudioSettings, Settings, SipSettings, split_list};
+use rustone_core::settings::{AudioSettings, Settings, split_list};
 use sip_engine::debug::{DebugFeed, LogSource};
 use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Levels, Meters, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
 
@@ -76,6 +76,12 @@ pub struct Sip {
     pub codecs: Vec<sip_engine::CodecInfo>,
     /// Sound devices the engine sees.
     pub audio_devices: Vec<AudioDevice>,
+    /// Video devices (cameras and renderers) the engine sees.
+    pub video_devices: Vec<sip_engine::VideoDevice>,
+    /// The camera preview is on from Settings.
+    pub preview: bool,
+    /// Calls were live last time: their end stops the preview.
+    had_calls: bool,
     /// Watched contacts' presence, by the number they were subscribed with.
     pub presence: std::collections::HashMap<String, sip_engine::Presence>,
     pub calls: CallBook,
@@ -100,7 +106,7 @@ impl Sip {
         let events: Arc<Mutex<Vec<Event>>> = Arc::default();
         let sink_events = events.clone();
         let sink_waker = waker.clone();
-        let config = engine_config(&settings.sip, &settings.local_account, &log_file);
+        let config = engine_config(settings, &log_file);
         let (engine, engine_state) = match Engine::spawn(config.clone(), move |event| {
             sink_events.lock().unwrap_or_else(|e| e.into_inner()).push(event);
             sink_waker.wake();
@@ -125,6 +131,9 @@ impl Sip {
             reg: RegState::Unregistered,
             codecs: Vec::new(),
             audio_devices: Vec::new(),
+            video_devices: Vec::new(),
+            preview: false,
+            had_calls: false,
             presence: std::collections::HashMap::new(),
             calls: CallBook::new(sounds),
         };
@@ -135,7 +144,7 @@ impl Sip {
     /// Sends the engine whatever changed in the settings since last time.
     pub fn sync(&mut self, settings: &Settings) {
         let Some(engine) = &self.engine else { return };
-        let config = engine_config(&settings.sip, &settings.local_account, &self.log_file);
+        let config = engine_config(settings, &self.log_file);
         // A restart drops calls: wait until none are live.
         if self.applied.config.as_ref() != Some(&config) && self.calls.live_count() == 0 {
             log::info!("SIP settings changed; restarting the engine");
@@ -164,6 +173,12 @@ impl Sip {
             engine.send(Command::SetLevels(levels));
             self.applied.levels = Some(levels);
         }
+        // The preview closes when the last call ends.
+        let live = self.calls.live_count() > 0;
+        if self.had_calls && !live && !self.preview {
+            engine.send(Command::SetPreview(false));
+        }
+        self.had_calls = live;
         // The VU meter only matters while a call is shown.
         let meters = self.calls.live_count() > 0;
         if self.applied.meters != Some(meters) {
@@ -223,6 +238,7 @@ impl Sip {
                 Event::Started => self.engine_state = EngineState::Running,
                 Event::Codecs(codecs) => self.codecs = codecs,
                 Event::AudioDevices(devices) => self.audio_devices = devices,
+                Event::VideoDevices(devices) => self.video_devices = devices,
                 Event::Presence(p) => {
                     self.presence.insert(p.number.clone(), p);
                 }
@@ -307,7 +323,8 @@ fn failure_text(code: u16, reason: &str, detail: Option<&str>) -> String {
     }
 }
 
-pub fn engine_config(sip: &SipSettings, local: &LocalAccount, log_file: &std::path::Path) -> EngineConfig {
+pub fn engine_config(settings: &Settings, log_file: &std::path::Path) -> EngineConfig {
+    let (sip, local) = (&settings.sip, &settings.local_account);
     EngineConfig {
         user_agent: sip.user_agent.trim().to_owned(),
         rport: sip.rport,
@@ -323,11 +340,15 @@ pub fn engine_config(sip: &SipSettings, local: &LocalAccount, log_file: &std::pa
         local_account: local.enabled,
         log_file: sip.enable_log.then(|| log_file.to_path_buf()),
         null_audio: false,
-        video: sip_engine::VideoConfig::default(),
+        video: sip_engine::VideoConfig {
+            enabled: settings.features.video,
+            camera: settings.video.camera.clone(),
+            bitrate_kbps: settings.video.bitrate_kbps,
+        },
     }
 }
 
-pub fn account_config(a: &Account, _sip: &SipSettings) -> AccountConfig {
+pub fn account_config(a: &Account, _sip: &rustone_core::settings::SipSettings) -> AccountConfig {
     AccountConfig {
         server: a.server.trim().to_owned(),
         proxies: a.proxies(),
@@ -400,14 +421,18 @@ mod tests {
 
     #[test]
     fn engine_config_follows_switches() {
-        let mut sip = SipSettings { stun: "a; b".into(), dns_srv_ns: "8.8.8.8".into(), ..SipSettings::default() };
+        let mut settings = Settings::default();
+        settings.sip = rustone_core::settings::SipSettings { stun: "a; b".into(), dns_srv_ns: "8.8.8.8".into(), ..Default::default() };
         let log = std::path::Path::new("sip.log");
-        let c = engine_config(&sip, &LocalAccount::default(), log);
+        let c = engine_config(&settings, log);
         assert!(c.stun_servers.is_empty() && c.nameservers.is_empty() && c.log_file.is_none());
-        sip.enable_stun = true;
-        sip.dns_srv = true;
-        sip.enable_log = true;
-        let c = engine_config(&sip, &LocalAccount { enabled: true, ..LocalAccount::default() }, log);
+        settings.sip.enable_stun = true;
+        settings.sip.dns_srv = true;
+        settings.sip.enable_log = true;
+        settings.local_account = LocalAccount { enabled: true, ..LocalAccount::default() };
+        settings.features.video = false;
+        let c = engine_config(&settings, log);
+        assert!(!c.video.enabled);
         assert_eq!(c.stun_servers, ["a", "b"]);
         assert_eq!(c.nameservers, ["8.8.8.8"]);
         assert!(c.local_account);
@@ -425,7 +450,7 @@ mod tests {
             voicemail_number: "*86".into(),
             ..Account::default()
         };
-        let c = account_config(&a, &SipSettings::default());
+        let c = account_config(&a, &rustone_core::settings::SipSettings::default());
         assert_eq!(c.server, "sip.example.com");
         assert_eq!(c.proxies, ["192.168.29.1:5068"]);
         assert_eq!(c.transport, sip_engine::Transport::Tls);
