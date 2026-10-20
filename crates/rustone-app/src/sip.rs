@@ -85,6 +85,8 @@ pub struct Sip {
     had_calls: bool,
     /// Watched contacts' presence, by the number they were subscribed with.
     pub presence: std::collections::HashMap<String, sip_engine::Presence>,
+    /// The voicemail box's latest summary (MWI).
+    pub voicemail: Option<sip_engine::Voicemail>,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
     meters: Arc<Meters>,
@@ -139,6 +141,7 @@ impl Sip {
             preview: false,
             had_calls: false,
             presence: std::collections::HashMap::new(),
+            voicemail: None,
             calls: CallBook::new(sounds),
         };
         sip.sync(settings);
@@ -160,6 +163,7 @@ impl Sip {
             self.calls.account = settings.active().filter(|a| a.is_usable()).map(|a| rustone_core::rules::Identity { user: a.username.clone(), domain: a.domain.clone() });
             // The engine drops the old account's subscriptions.
             self.presence.clear();
+            self.voicemail = None;
             engine.send(Command::SetAccount(account.clone()));
             self.applied.account = Some(account);
         }
@@ -258,6 +262,7 @@ impl Sip {
                 Event::Codecs(codecs) => self.codecs = codecs,
                 Event::AudioDevices(devices) => self.audio_devices = devices,
                 Event::VideoDevices(devices) => self.video_devices = devices,
+                Event::Voicemail(v) => self.voicemail = Some(v),
                 Event::Presence(p) => {
                     self.presence.insert(p.number.clone(), p);
                 }

@@ -208,6 +208,28 @@ pub unsafe extern "C" fn on_call_rx_offer(call_id: pjsua_call_id, offer: *const 
     guard(|| calls::on_reoffer(call_id, offer, opt));
 }
 
+/// A message-waiting NOTIFY (subscribed, or unsolicited from the
+/// registrar).
+pub unsafe extern "C" fn on_mwi_info(_acc_id: pjsua_acc_id, mwi_info: *mut pjsua_mwi_info) {
+    guard(|| {
+        // SAFETY: pjsua passes valid info for the callback's duration.
+        let Some(rdata) = (unsafe { mwi_info.as_ref() }).map(|m| m.rdata).filter(|r| !r.is_null()) else { return };
+        let mut body = vec![0 as c_char; 4096];
+        let mut ctype = [0 as c_char; 128];
+        // SAFETY: rdata is valid here; the shim writes NUL-terminated strings.
+        let len = unsafe { shim::jf_rdata_body(rdata, body.as_mut_ptr(), body.len(), ctype.as_mut_ptr(), ctype.len()) };
+        if len < 0 {
+            return;
+        }
+        let ctype = unsafe { std::ffi::CStr::from_ptr(ctype.as_ptr()) }.to_string_lossy().to_ascii_lowercase();
+        if !ctype.is_empty() && ctype != "application/simple-message-summary" {
+            return;
+        }
+        let body = unsafe { std::ffi::CStr::from_ptr(body.as_ptr()) }.to_string_lossy().into_owned();
+        emit(Event::Voicemail(crate::Voicemail::parse(&body)));
+    });
+}
+
 pub unsafe extern "C" fn on_dtmf_digit(call_id: pjsua_call_id, digit: c_int) {
     guard(|| {
         let Some(digit) = u8::try_from(digit).ok().map(char::from) else { return };

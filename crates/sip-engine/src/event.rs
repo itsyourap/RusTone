@@ -46,6 +46,8 @@ pub enum Event {
     TransferStatus { call: CallId, code: u16, text: String, done: bool },
     /// A call command failed (hold, transfer, DTMF...).
     CallError { call: Option<CallId>, reason: String },
+    /// The voicemail box's state, from an MWI NOTIFY (RFC 3842).
+    Voicemail(Voicemail),
     /// A recording was closed (the call ended or recording stopped).
     RecordingSaved { call: CallId, path: std::path::PathBuf },
 }
@@ -74,5 +76,52 @@ pub enum RegState {
 impl RegState {
     pub fn is_registered(&self) -> bool {
         matches!(self, Self::Registered { .. } | Self::NoRegistrar)
+    }
+}
+
+/// A voicemail summary (`application/simple-message-summary`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Voicemail {
+    /// `Messages-Waiting: yes`.
+    pub waiting: bool,
+    /// New and old voice messages (`Voice-Message: 2/8`), when given.
+    pub new: Option<u32>,
+    pub old: Option<u32>,
+}
+
+impl Voicemail {
+    /// Reads a message summary body (only
+    /// Messages-Waiting counts).
+    pub fn parse(body: &str) -> Self {
+        let mut summary = Self::default();
+        for line in body.lines() {
+            let Some((key, value)) = line.split_once(':') else { continue };
+            let value = value.trim();
+            match key.trim().to_ascii_lowercase().as_str() {
+                "messages-waiting" => summary.waiting = value.eq_ignore_ascii_case("yes"),
+                "voice-message" => {
+                    // "2/8 (0/2)": new/old, then urgent new/old.
+                    let counts = value.split_whitespace().next().unwrap_or("");
+                    if let Some((new, old)) = counts.split_once('/') {
+                        summary.new = new.trim().parse().ok();
+                        summary.old = old.trim().parse().ok();
+                    }
+                }
+                _ => {}
+            }
+        }
+        summary
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_summaries_are_read() {
+        let body = ["Messages-Waiting: yes", "Message-Account: sip:alice@vmail.example.com", "Voice-Message: 2/8 (0/2)"].join("\r\n");
+        assert_eq!(Voicemail::parse(&body), Voicemail { waiting: true, new: Some(2), old: Some(8) });
+        assert_eq!(Voicemail::parse("Messages-Waiting: no"), Voicemail { waiting: false, new: None, old: None });
     }
 }

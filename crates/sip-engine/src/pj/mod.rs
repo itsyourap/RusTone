@@ -134,6 +134,7 @@ impl Session {
         ua.cb.on_call_state = Some(callbacks::on_call_state);
         ua.cb.on_call_media_state = Some(callbacks::on_call_media_state);
         ua.cb.on_call_rx_offer = Some(callbacks::on_call_rx_offer);
+        ua.cb.on_mwi_info = Some(callbacks::on_mwi_info);
         ua.cb.on_dtmf_digit = Some(callbacks::on_dtmf_digit);
         ua.cb.on_call_transfer_request2 = Some(callbacks::on_call_transfer_request2);
         ua.cb.on_call_transfer_status = Some(callbacks::on_call_transfer_status);

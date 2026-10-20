@@ -157,6 +157,24 @@ fn responses_headers_and_delayed_commands() {
     assert!(wav.starts_with(b"RIFF") && &wav[8..12] == b"WAVE", "a WAV file");
     assert!(wav.len() > 44 + 8000, "about a second of audio: {} bytes", wav.len());
     let _ = std::fs::remove_dir_all(&dir);
+
+    // 7. Voicemail: an unsolicited MWI NOTIFY (as registrars send).
+    let body = "Messages-Waiting: yes\r\nVoice-Message: 3/1 (0/0)\r\n";
+    let notify = format!(
+        "NOTIFY sip:rustone-test@{ENGINE} SIP/2.0\r\nVia: SIP/2.0/UDP {CALLER};branch=z9hG4bK-mwi1;rport\r\nMax-Forwards: 70\r\nFrom: <sip:vm@{CALLER}>;tag=mwi1\r\nTo: <sip:rustone-test@{ENGINE}>\r\nCall-ID: mwi-1\r\nCSeq: 1 NOTIFY\r\nEvent: message-summary\r\nContact: <sip:vm@{CALLER}>\r\nContent-Type: application/simple-message-summary\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    peer.send(ENGINE.parse().unwrap(), &notify);
+    let ok = peer.recv("the NOTIFY's answer", |m| m.header("Call-ID") == "mwi-1" && m.code() > 0);
+    assert_eq!(ok.code(), 200, "{}", ok.first);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let voicemail = loop {
+        assert!(Instant::now() < deadline, "no Voicemail event");
+        if let Ok(Event::Voicemail(v)) = rx.recv_timeout(Duration::from_millis(200)) {
+            break v;
+        }
+    };
+    assert!(voicemail.waiting && voicemail.new == Some(3) && voicemail.old == Some(1), "{voicemail:?}");
     std::thread::sleep(Duration::from_millis(300));
     drop(engine);
 }

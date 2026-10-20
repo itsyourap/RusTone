@@ -93,7 +93,15 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                 Page::Dialer if app.sip.calls.has_calls() && !app.ui.adding_call => call::show(ui, app, &p),
                 Page::Dialer => {
                     let can_call = app.status().is_online() || app.settings.local_account.enabled;
-                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call, app.settings.features.video) {
+                    let voicemail = app.settings.active().filter(|a| !a.voicemail_number.trim().is_empty()).map(|_| {
+                        let mwi = app.sip.voicemail.unwrap_or_default();
+                        dialer::VoicemailChip { waiting: mwi.waiting, new: mwi.new }
+                    });
+                    match dialer::show(ui, &p, &mut app.ui.dialer, can_call, app.settings.features.video, voicemail) {
+                        Some(dialer::Action::Voicemail) => {
+                            let number = app.settings.active().map(|a| a.voicemail_number.trim().to_owned()).unwrap_or_default();
+                            dial(app, &number, false);
+                        }
                         Some(dialer::Action::Call(target)) => dial(app, &target, false),
                         Some(dialer::Action::VideoCall(target)) => dial(app, &target, true),
                         Some(dialer::Action::Key(digit)) => app.sip.send(sip_engine::Command::PlayLocalDigits(digit)),

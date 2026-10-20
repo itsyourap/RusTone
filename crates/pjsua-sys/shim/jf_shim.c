@@ -77,6 +77,37 @@ pj_status_t jf_prefer_local_codec_order(pjsip_rx_data *rdata)
 }
 
 /*
+ * Copies a received message's body into `buf` and its media type
+ * ("application/simple-message-summary") into `ctype`, both NUL-terminated
+ * and truncated to fit. Returns the body's full length, or -1 without one.
+ */
+int jf_rdata_body(const pjsip_rx_data *rdata, char *buf, size_t buf_len,
+                  char *ctype, size_t ctype_len)
+{
+    const pjsip_msg_body *body;
+    size_t n;
+
+    if (!rdata || !rdata->msg_info.msg || !buf || buf_len < 1)
+        return -1;
+    body = rdata->msg_info.msg->body;
+    if (!body || !body->len)
+        return -1;
+    n = body->len < buf_len - 1 ? body->len : buf_len - 1;
+    pj_memcpy(buf, body->data, n);
+    buf[n] = '\0';
+    if (ctype && ctype_len) {
+        int len = pj_ansi_snprintf(ctype, ctype_len, "%.*s/%.*s",
+                                   (int)body->content_type.type.slen,
+                                   body->content_type.type.ptr,
+                                   (int)body->content_type.subtype.slen,
+                                   body->content_type.subtype.ptr);
+        if (len < 0)
+            ctype[0] = '\0';
+    }
+    return (int)body->len;
+}
+
+/*
  * Adds the header "name: value" to a message's extra headers. `storage`
  * is caller memory of jf_sizeof_generic_string_hdr() bytes that, like the
  * strings and `msg`, must stay put until the request or response is sent.

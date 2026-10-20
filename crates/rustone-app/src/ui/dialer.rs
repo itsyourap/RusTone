@@ -44,6 +44,37 @@ pub enum Action {
     VideoCall(String),
     /// A keypad key, for local tone feedback.
     Key(String),
+    /// Call the voicemail box.
+    Voicemail,
+}
+
+/// The voicemail box, when the account has one (the voicemail
+/// button, lit by MWI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoicemailChip {
+    pub waiting: bool,
+    pub new: Option<u32>,
+}
+
+/// The voicemail chip in the top-left corner, painted so it takes no
+/// layout space. Returns true when clicked.
+fn voicemail_chip(ui: &mut Ui, p: &Palette, vm: VoicemailChip, enabled: bool) -> bool {
+    let text = match (vm.waiting, vm.new) {
+        (true, Some(n)) if n > 0 => format!("{n} new"),
+        (true, _) => "New messages".to_owned(),
+        (false, _) => "Voicemail".to_owned(),
+    };
+    let (fill, ink) = if vm.waiting { (p.accent, p.on_accent) } else { (p.surface, p.secondary) };
+    let galley = ui.painter().layout_no_wrap(text.clone(), egui::FontId::proportional(12.5), ink);
+    let size = egui::vec2(galley.size().x + 38.0, 26.0);
+    let rect = egui::Rect::from_min_size(ui.max_rect().left_top() + egui::vec2(12.0, 8.0), size);
+    let response = ui.interact(rect, ui.id().with("voicemail-chip"), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("Voicemail: {text}")));
+    let fill = if response.hovered() && enabled { fill.gamma_multiply(0.85) } else { fill };
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(13), fill);
+    Icon::Voicemail.image(ink, 16.0).paint_at(ui, egui::Rect::from_center_size(rect.left_center() + egui::vec2(18.0, 0.0), egui::Vec2::splat(16.0)));
+    ui.painter().galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    response.on_hover_text("Call your voicemail").clicked()
 }
 
 /// Characters a dial string may contain (digits, DTMF symbols, a leading +),
@@ -52,8 +83,13 @@ fn allowed(c: char) -> bool {
     c.is_ascii_alphanumeric() || "*#+@.:-_;=".contains(c)
 }
 
-pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool, video: bool) -> Option<Action> {
+pub fn show(ui: &mut Ui, p: &Palette, state: &mut DialerState, registered: bool, video: bool, voicemail: Option<VoicemailChip>) -> Option<Action> {
     let mut action = None;
+    if let Some(vm) = voicemail
+        && voicemail_chip(ui, p, vm, registered)
+    {
+        action = Some(Action::Voicemail);
+    }
 
     ui.with_layout(Layout::top_down(Align::Center), |ui| {
         let keypad_height = 4.0 * KEY_SIZE + 3.0 * KEY_GAP;
@@ -282,8 +318,22 @@ mod tests {
     /// The dialer in a test harness, with the app's fonts and icons.
     fn dialer_harness() -> egui_kittest::Harness<'static, DialerState> {
         crate::ui::test_support::harness([475.0, 760.0], DialerState::default(), |ui, state| {
-            show(ui, &Palette::dark(), state, true, true);
+            show(ui, &Palette::dark(), state, true, true, None);
         })
+    }
+
+    #[test]
+    fn the_voicemail_chip_shows_new_messages_and_calls() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = crate::ui::test_support::harness([475.0, 760.0], false, |ui, clicked| {
+            let vm = VoicemailChip { waiting: true, new: Some(3) };
+            if show(ui, &Palette::dark(), &mut DialerState::default(), true, true, Some(vm)) == Some(Action::Voicemail) {
+                *clicked = true;
+            }
+        });
+        harness.get_by_label("Voicemail: 3 new").click();
+        harness.run_steps(2);
+        assert!(*harness.state());
     }
 
     #[test]

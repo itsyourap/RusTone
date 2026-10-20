@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 pub use audio::{AudioDevice, AudioDevices, Levels, Meters};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
-pub use event::{Event, RegState};
+pub use event::{Event, RegState, Voicemail};
 pub use pj::{CallOptions, RecordingOptions};
 pub use message::{IncomingMessage, MessageId, MessageStatus};
 pub use presence::{Presence, PresenceState};

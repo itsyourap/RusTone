@@ -103,6 +103,10 @@ pub mod shim {
 
         pub fn jf_sizeof_generic_string_hdr() -> usize;
 
+        /// Copies a received message's body and media type (both
+        /// NUL-terminated). Returns the body's length, or -1 without one.
+        pub fn jf_rdata_body(rdata: *const pjsip_rx_data, buf: *mut c_char, buf_len: usize, ctype: *mut c_char, ctype_len: usize) -> c_int;
+
         /// Registers the SIP message tap module (after pjsua_init).
         pub fn jf_msg_tap_install(cb: MsgCallback) -> pj_status_t;
         /// Unregisters it (before pjsua_destroy).

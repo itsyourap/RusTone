@@ -43,6 +43,7 @@ fastframe_icons::icons! {
         Send => "send-horizontal",
         VideoOff => "video-off",
         Record => "circle-dot",
+        Voicemail => "voicemail",
         Maximize => lucide "maximize-2",
         Minimize => lucide "minimize-2",
         More => lucide "ellipsis",
