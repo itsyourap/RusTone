@@ -2362,81 +2362,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
-name = "rustone-app"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_extras",
- "egui_kittest",
- "egui_plot",
- "fastframe-autostart",
- "fastframe-dirs",
- "fastframe-dock",
- "fastframe-file",
- "fastframe-fonts",
- "fastframe-icons",
- "fastframe-instance",
- "fastframe-log",
- "fastframe-notifications",
- "fastframe-now-playing",
- "fastframe-power",
- "fastframe-shell",
- "fastframe-text",
- "fastframe-theme",
- "fastframe-titlebar",
- "fastframe-tray",
- "hidapi",
- "if-addrs",
- "rustone-core",
- "rustone-win",
- "jiff",
- "log",
- "realfft",
- "resvg",
- "rfd",
- "sip-engine",
- "ureq",
- "user-idle",
- "winreg",
-]
-
-[[package]]
-name = "rustone-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "ctrlc",
- "pjsua-sys",
- "regex",
- "serde",
- "toml 0.9.12+spec-1.1.0",
-]
-
-[[package]]
-name = "rustone-core"
-version = "0.1.0"
-dependencies = [
- "keyring-core",
- "md-5",
- "regex",
- "roxmltree 0.21.1",
- "rusqlite",
- "serde",
- "serde_json",
- "toml 0.9.12+spec-1.1.0",
- "windows-native-keyring-store",
-]
-
-[[package]]
-name = "rustone-win"
-version = "0.1.0"
-dependencies = [
- "windows 0.62.2",
-]
-
-[[package]]
 name = "jiff"
 version = "0.2.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4085,6 +4010,81 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted",
+]
+
+[[package]]
+name = "rustone-app"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "egui_kittest",
+ "egui_plot",
+ "fastframe-autostart",
+ "fastframe-dirs",
+ "fastframe-dock",
+ "fastframe-file",
+ "fastframe-fonts",
+ "fastframe-icons",
+ "fastframe-instance",
+ "fastframe-log",
+ "fastframe-notifications",
+ "fastframe-now-playing",
+ "fastframe-power",
+ "fastframe-shell",
+ "fastframe-text",
+ "fastframe-theme",
+ "fastframe-titlebar",
+ "fastframe-tray",
+ "hidapi",
+ "if-addrs",
+ "jiff",
+ "log",
+ "realfft",
+ "resvg",
+ "rfd",
+ "rustone-core",
+ "rustone-win",
+ "sip-engine",
+ "ureq",
+ "user-idle",
+ "winreg",
+]
+
+[[package]]
+name = "rustone-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ctrlc",
+ "pjsua-sys",
+ "regex",
+ "serde",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
+name = "rustone-core"
+version = "0.1.0"
+dependencies = [
+ "keyring-core",
+ "md-5",
+ "regex",
+ "roxmltree 0.21.1",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "toml 0.9.12+spec-1.1.0",
+ "windows-native-keyring-store",
+]
+
+[[package]]
+name = "rustone-win"
+version = "0.1.0"
+dependencies = [
+ "windows 0.62.2",
 ]
 
 [[package]]
