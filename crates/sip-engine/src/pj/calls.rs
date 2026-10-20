@@ -30,9 +30,7 @@ static HEADERS: LazyLock<Mutex<HashMap<CallId, Headers>>> = LazyLock::new(Mutex:
 
 /// Reads caller ID, User-Agent and Diversion from an incoming INVITE.
 pub fn capture_headers(call_id: CallId, rdata: *const pjsip_rx_data) {
-    let caller_id = rdata_header(rdata, c"P-Asserted-Identity")
-        .or_else(|| rdata_header(rdata, c"Remote-Party-ID"))
-        .and_then(|v| caller_id_value(&v));
+    let caller_id = caller_id(rdata);
     let user_agent = rdata_header(rdata, c"User-Agent").map(|v| user_agent_value(&v));
     let diversion = rdata_header(rdata, c"Diversion").map(|v| {
         let uri = uri_user_host(&v);
@@ -43,6 +41,12 @@ pub fn capture_headers(call_id: CallId, rdata: *const pjsip_rx_data) {
         }
     });
     lock(&HEADERS).insert(call_id, Headers { caller_id, user_agent, diversion });
+}
+
+/// The caller ID of a received request: P-Asserted-Identity, else
+/// Remote-Party-ID, when it holds a SIP address.
+pub fn caller_id(rdata: *const pjsip_rx_data) -> Option<String> {
+    rdata_header(rdata, c"P-Asserted-Identity").or_else(|| rdata_header(rdata, c"Remote-Party-ID")).and_then(|v| caller_id_value(&v))
 }
 
 fn rdata_header(rdata: *const pjsip_rx_data, name: &std::ffi::CStr) -> Option<String> {

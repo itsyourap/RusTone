@@ -5,6 +5,7 @@ mod audio;
 mod callbacks;
 mod calls;
 pub mod debug;
+mod messages;
 mod presence;
 mod quality;
 mod util;
@@ -122,6 +123,8 @@ impl Session {
         ua.cb.on_call_transfer_status = Some(callbacks::on_call_transfer_status);
         ua.cb.on_call_redirected = Some(callbacks::on_call_redirected);
         ua.cb.on_buddy_state = Some(presence::on_buddy_state);
+        ua.cb.on_pager2 = Some(messages::on_pager2);
+        ua.cb.on_pager_status2 = Some(messages::on_pager_status2);
 
         pj_default!(log: pjsua_logging_config = pjsua_logging_config_default);
         log.cb = Some(callbacks::on_log);
@@ -631,6 +634,18 @@ impl Session {
 
     pub fn set_mute(&self, mic: bool, speaker: bool) {
         calls::set_mute(mic, speaker);
+    }
+
+    /// Sends a text message from the main account, or from the local account
+    /// when `local`.
+    pub fn send_message(&mut self, id: crate::MessageId, target: &str, text: &str, local: bool) -> Result<(), String> {
+        let acc = if local { self.local_account } else { self.account };
+        if acc == PJSUA_INVALID_ID {
+            return Err(if local { "the local account is off".into() } else { "no account to send from".into() });
+        }
+        let uri = self.target_uri(target, local)?;
+        let uri = uri.trim().trim_start_matches('<').trim_end_matches('>');
+        messages::send(acc, uri, text, id)
     }
 
     /// Blind transfer (REFER) to `target`.

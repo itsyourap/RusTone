@@ -12,6 +12,7 @@ mod call;
 mod config;
 pub mod debug;
 mod event;
+mod message;
 #[cfg(windows)]
 mod hotplug;
 mod pj;
@@ -29,6 +30,7 @@ pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, Me
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
 pub use pj::CallOptions;
+pub use message::{IncomingMessage, MessageId, MessageStatus};
 pub use presence::{Presence, PresenceState};
 pub use quality::CallQuality;
 
@@ -70,6 +72,10 @@ pub enum Command {
     SendDtmf { call: CallId, digits: String, method: DtmfMethod },
     /// Play digits on the local speaker only (keypad feedback).
     PlayLocalDigits(String),
+    /// Send a text message (SIP MESSAGE, text/plain); its outcome comes back
+    /// as [`Event::MessageStatus`] with the same `id`. `local` sends from the
+    /// local account.
+    SendMessage { id: MessageId, target: String, text: String, local: bool },
     /// Blind transfer to a number or SIP URI.
     Transfer { call: CallId, target: String },
     /// Attended transfer: join `call`'s party with `with`'s.
@@ -362,8 +368,10 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
             other => match &mut session {
                 Some(s) => call_command(s, other, &sink),
                 None => {
-                    if let Command::MakeCall { target, .. } = other {
-                        sink(Event::CallFailed { target, reason: "the SIP engine isn't running".into() });
+                    match other {
+                        Command::MakeCall { target, .. } => sink(Event::CallFailed { target, reason: "the SIP engine isn't running".into() }),
+                        Command::SendMessage { id, .. } => sink(Event::MessageStatus(MessageStatus { id, code: 0, reason: "the SIP engine isn't running".into() })),
+                        _ => {}
                     }
                 }
             },
@@ -398,6 +406,12 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::SendDtmf { call, digits, method } => call_error(Some(call), s.send_dtmf(call, &digits, method)),
         Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),
         Command::Transfer { call, target } => call_error(Some(call), s.transfer(call, &target)),
+        Command::SendMessage { id, target, text, local } => {
+            if let Err(reason) = s.send_message(id, &target, &text, local) {
+                log::warn!("message not sent: {reason}");
+                sink(Event::MessageStatus(MessageStatus { id, code: 0, reason }));
+            }
+        }
         Command::AttendedTransfer { call, with } => call_error(Some(call), s.attended_transfer(call, with)),
         Command::PlaySound(sound) => call_error(None, s.play_sound(&sound)),
         Command::StopSound => s.stop_sound(),
