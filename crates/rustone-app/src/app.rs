@@ -914,6 +914,7 @@ impl App {
         }
         // Drawn from `logic` so it keeps updating while the main window is minimised.
         crate::ui::debug::show(ctx, self);
+        crate::ui::settings::show_window(ctx, self);
 
         // Call timers and ended-call cleanup.
         if self.sip.calls.has_calls() {
@@ -973,8 +974,9 @@ impl Resident for App {
         // Video textures belonged to the old window.
         self.ui.video = crate::ui::video::VideoView::default();
         self.taskbar = fastframe_dock::Taskbar::default();
-        // The debug window is a child of the main window.
+        // The debug and settings windows are children of the main window.
         crate::ui::debug::set_open(self, false);
+        self.ui.settings_open = false;
         self.next = Closed::Quit;
         self.wants_show = false;
         self.applied_palette = None;

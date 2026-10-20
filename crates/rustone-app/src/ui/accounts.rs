@@ -5,7 +5,6 @@ use fastframe_fonts::Weight;
 use rustone_core::account::{Account, SrtpMode, Transport};
 
 use super::widgets::{self, card, section_title, setting_row};
-use super::Page;
 use crate::app::App;
 use crate::icons::Icon;
 use crate::sip::Status;
@@ -56,7 +55,6 @@ pub fn list(ui: &mut Ui, app: &mut App, p: &Palette) {
             && let Some(account) = app.settings.account(id)
         {
             app.ui.account_draft = Some(Draft { account: account.clone(), ..Draft::default() });
-            app.ui.page = Page::Account;
         }
         if app.settings.accounts.is_empty() {
             ui.label(egui::RichText::new("No accounts yet. Add your SIP account to make and receive calls.").size(13.0).color(p.dim));
@@ -64,7 +62,6 @@ pub fn list(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.add_space(4.0);
         if ui.add(egui::Button::new(egui::RichText::new("＋  Add account").font(Weight::Medium.font_id(14.0)))).clicked() {
             app.ui.account_draft = Some(Draft::default());
-            app.ui.page = Page::Account;
         }
     });
 
@@ -131,10 +128,7 @@ fn account_row(ui: &mut Ui, p: &Palette, account: &Account, active: bool, status
 
 /// The account editor page.
 pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
-    let Some(mut draft) = app.ui.account_draft.take() else {
-        app.ui.page = Page::Settings;
-        return;
-    };
+    let Some(mut draft) = app.ui.account_draft.take() else { return };
     let mut close = false;
 
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -237,9 +231,7 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.add_space(12.0);
     });
 
-    if close {
-        app.ui.page = Page::Settings;
-    } else {
+    if !close {
         app.ui.account_draft = Some(draft);
     }
 }

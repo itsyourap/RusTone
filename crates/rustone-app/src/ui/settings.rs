@@ -1,5 +1,6 @@
-//! The settings page: accounts, appearance and window behaviour. The full
-//! Settings arrive in Phase 8.
+//! The settings window: three tabs whose
+//! sections are laid out in as many columns as the window is wide, so each
+//! fits without scrolling; and the account editor.
 
 use egui::Ui;
 use rustone_core::settings::{AutoAnswerWhen, DenyIncoming, DtmfMethod, ThemePreference};
@@ -9,339 +10,343 @@ use crate::app::App;
 use crate::icons::Icon;
 use crate::theme::Palette;
 
-pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
-    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        ui.add_space(4.0);
-        ui.heading("Settings");
-        ui.add_space(8.0);
 
-        super::accounts::list(ui, app, p);
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Audio devices");
-        audio_devices(ui, app, p);
-        ui.add_space(12.0);
-
-        if app.settings.features.video {
-            section_title(ui, p, "Video");
-            video(ui, app, p);
-            ui.add_space(12.0);
+fn users_directory(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let response = widgets::text_field(
+            ui,
+            p,
+            "Directory URL",
+            "https://… (JSON, XML, Yealink or CSV); {username} and %s fill in the account",
+            &mut app.settings.sip.users_directory,
+        );
+        if response.changed() {
+            app.mark_settings_dirty();
         }
-
-        section_title(ui, p, "Audio codecs");
-        codecs(ui, app, p);
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Users directory");
-        card(ui, p, |ui| {
-            let response = widgets::text_field(
-                ui,
-                p,
-                "Directory URL",
-                "https://… (JSON, XML, Yealink or CSV); {username} and %s fill in the account",
-                &mut app.settings.sip.users_directory,
-            );
-            if response.changed() {
-                app.mark_settings_dirty();
-            }
-            let status = match &app.directory.status {
-                Some(s) => s.clone(),
-                None if app.settings.sip.users_directory.trim().is_empty() => "Its contacts are added and kept up to date; yours are never changed.".to_owned(),
-                None => "Loading…".to_owned(),
-            };
-            ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Calls");
-        card(ui, p, |ui| {
-            let calls = &mut app.settings.calls;
-            let mut changed = false;
-            setting_stack(ui, p, "DTMF", Some("How keypad digits are sent during a call"), |ui| {
-                egui::ComboBox::from_id_salt("dtmf-method")
-                    .width(ui.available_width())
-                    .selected_text(dtmf_label(calls.dtmf_method))
-                    .show_ui(ui, |ui| {
-                        for method in [DtmfMethod::Auto, DtmfMethod::Rfc2833, DtmfMethod::InBand, DtmfMethod::SipInfo] {
-                            changed |= ui.selectable_value(&mut calls.dtmf_method, method, dtmf_label(method)).changed();
-                        }
-                    });
-            });
-            ui.separator();
-            setting_stack(ui, p, "Reject calls", Some("Incoming calls refused with 486 Busy"), |ui| {
-                egui::ComboBox::from_id_salt("deny-incoming")
-                    .width(ui.available_width())
-                    .selected_text(deny_label(calls.deny_incoming))
-                    .show_ui(ui, |ui| {
-                        for mode in [DenyIncoming::Off, DenyIncoming::All, DenyIncoming::OtherUser, DenyIncoming::OtherDomain, DenyIncoming::RemoteDomain, DenyIncoming::OtherUserOrDomain] {
-                            changed |= ui.selectable_value(&mut calls.deny_incoming, mode, deny_label(mode)).changed();
-                        }
-                    });
-            });
-            ui.separator();
-            changed |= widgets::number_field(ui, p, "Hang up calls after (0 for never)", &mut calls.auto_hangup, 0..=86_400, " s").changed();
-            ui.add_space(4.0);
-            ui.separator();
-            for (value, title, description) in [
-                (&mut calls.dnd, "Do not disturb", Some("Refuse incoming calls. Also under the status pill and in the tray")),
-                (&mut calls.local_dtmf, "Call sounds", Some("Keypad tones, call-waiting beep and hang-up sound")),
-                (&mut calls.call_waiting, "Call waiting", Some("Accept a second call during a call")),
-                (&mut calls.bring_to_front, "Show window for incoming calls", None),
-                (&mut calls.media_keys, "Media keys and headset buttons", Some("Play answers or holds, stop hangs up, during calls")),
-                (&mut calls.headset, "USB headset controls", Some("Hook switch answers and hangs up, mute and redial buttons, headset lights")),
-            ] {
-                setting_row(ui, p, title, description, |ui| {
-                    changed |= widgets::toggle(ui, p, value, title).changed();
-                });
-            }
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Auto-answer");
-        card(ui, p, |ui| {
-            let calls = &mut app.settings.calls;
-            let mut changed = false;
-            for (value, title, description) in [
-                (&mut calls.auto_answer, "Answer every call", Some("Also under the status pill and in the tray")),
-                (&mut calls.auto_answer_on_request, "Answer when the caller asks", Some("X-AUTOANSWER or Call-Info answer-after (intercom, paging)")),
-            ] {
-                setting_row(ui, p, title, description, |ui| {
-                    changed |= widgets::toggle(ui, p, value, title).changed();
-                });
-            }
-            ui.separator();
-            changed |= widgets::number_field(ui, p, "Ring first for", &mut calls.auto_answer_delay, 0..=600, " s").changed();
-            changed |= widgets::text_field(ui, p, "Only these callers", "Everyone (e.g. 100;2*;+9133*)", &mut calls.auto_answer_numbers).changed();
-            ui.add_space(4.0);
-            setting_stack(ui, p, "While in another call", None, |ui| {
-                egui::ComboBox::from_id_salt("auto-answer-when")
-                    .width(ui.available_width())
-                    .selected_text(auto_answer_when_label(calls.auto_answer_when))
-                    .show_ui(ui, |ui| {
-                        for when in [AutoAnswerWhen::NoOtherCalls, AutoAnswerWhen::OthersOnHold, AutoAnswerWhen::Always] {
-                            changed |= ui.selectable_value(&mut calls.auto_answer_when, when, auto_answer_when_label(when)).changed();
-                        }
-                    });
-            });
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Forwarding");
-        card(ui, p, |ui| {
-            let calls = &mut app.settings.calls;
-            let mut changed = false;
-            setting_row(ui, p, "Forward calls", Some("Sends callers on with a 302. Also under the status pill and in the tray"), |ui| {
-                changed |= widgets::toggle(ui, p, &mut calls.forwarding, "Forward calls").changed();
-            });
-            ui.separator();
-            changed |= widgets::text_field(ui, p, "Forward to", "Number or SIP address", &mut calls.forwarding_number).changed();
-            ui.add_space(4.0);
-            changed |= widgets::number_field(ui, p, "Ring first for", &mut calls.forwarding_delay, 0..=600, " s").changed();
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Speed dial");
-        card(ui, p, |ui| speed_dial(ui, app, p));
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Recording");
-        card(ui, p, |ui| {
-            let recording = &mut app.settings.recording;
-            let mut changed = false;
-            for (value, title, description) in [
-                (&mut recording.button, "Record button", Some("Show Record in the call controls")),
-                (&mut recording.auto, "Record every call", Some("Starts when a call is answered")),
-            ] {
-                setting_row(ui, p, title, description, |ui| {
-                    changed |= widgets::toggle(ui, p, value, title).changed();
-                });
-            }
-            ui.separator();
-            let shown = recording.dir().display().to_string();
-            ui.label(egui::RichText::new("Folder").size(12.0).color(p.secondary));
-            ui.add(egui::Label::new(egui::RichText::new(&shown).size(12.5).color(p.text)).wrap());
-            ui.horizontal(|ui| {
-                if ui.button("Change…").clicked()
-                    && let Some(folder) = rfd::FileDialog::new().set_title("Recordings folder").set_directory(recording.dir()).pick_folder()
-                {
-                    recording.folder = folder.display().to_string();
-                    changed = true;
-                }
-                if !recording.folder.is_empty() && ui.button("Use default").clicked() {
-                    recording.folder.clear();
-                    changed = true;
-                }
-                if ui.button("Open").clicked() {
-                    let dir = recording.dir();
-                    let _ = std::fs::create_dir_all(&dir);
-                    let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                }
-            });
-            ui.label(egui::RichText::new("Recordings are WAV files with both sides of the call.").size(12.0).color(p.dim));
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Feature codes");
-        card(ui, p, |ui| {
-            let calls = &mut app.settings.calls;
-            let mut changed = false;
-            ui.label(egui::RichText::new("Codes your PBX understands, sent before a number.").size(12.0).color(p.dim));
-            changed |= widgets::text_field(ui, p, "Call pickup (empty for off)", "**", &mut calls.pickup_code).changed();
-            ui.add_space(6.0);
-            setting_row(ui, p, "Transfer with a code", Some("Dial the code and number in the call instead of a SIP transfer"), |ui| {
-                changed |= widgets::toggle(ui, p, &mut calls.use_transfer_code, "Transfer with a code").changed();
-            });
-            if calls.use_transfer_code {
-                changed |= widgets::text_field(ui, p, "Transfer code", "##", &mut calls.transfer_code).changed();
-            }
-            ui.separator();
-            setting_row(ui, p, "Attended transfer with a code", Some("Adds an attended transfer button to the transfer panel"), |ui| {
-                changed |= widgets::toggle(ui, p, &mut calls.use_attended_code, "Attended transfer with a code").changed();
-            });
-            if calls.use_attended_code {
-                changed |= widgets::text_field(ui, p, "Attended transfer code", "*2", &mut calls.attended_code).changed();
-            }
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Command hooks");
-        card(ui, p, |ui| {
-            ui.label(egui::RichText::new("Programs to run on call events. {number}, {name}, {callid}, {direction}, {duration} and {time} are filled in; without them the number is added at the end.").size(12.0).color(p.dim));
-            let hooks = &mut app.settings.hooks;
-            let mut changed = false;
-            for (value, label) in [
-                (&mut hooks.outgoing_call, "Outgoing call"),
-                (&mut hooks.incoming_call, "Incoming call"),
-                (&mut hooks.call_ring, "Ringing"),
-                (&mut hooks.call_answer, "Answered (incoming)"),
-                (&mut hooks.call_answer_video, "Answered with video"),
-                (&mut hooks.call_start, "Call started"),
-                (&mut hooks.call_busy, "Busy or declined"),
-                (&mut hooks.call_end, "Call ended"),
-            ] {
-                changed |= widgets::text_field(ui, p, label, "Command line", value).changed();
-                ui.add_space(4.0);
-            }
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Features");
-        card(ui, p, |ui| {
-            ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
-            let features = &mut app.settings.features;
-            let mut changed = false;
-            for (value, title, description) in [
-                (&mut features.presence, "Presence", "See when contacts are busy or on the phone (SUBSCRIBE)"),
-                (&mut features.messages, "Messages", "Send and receive text messages (MESSAGE)"),
-                (&mut features.transfer, "Call transfer", "Pass a call on to another number (REFER)"),
-                (&mut features.video, "Video calls", "Make and answer calls with video"),
-            ] {
-                setting_row(ui, p, title, Some(description), |ui| {
-                    changed |= widgets::toggle(ui, p, value, title).changed();
-                });
-            }
-            if changed {
-                app.mark_settings_dirty();
-            }
-        });
-        ui.add_space(12.0);
-
-        section_title(ui, p, "Appearance");
-        card(ui, p, |ui| {
-            setting_stack(ui, p, "Theme", Some("System follows the Windows light/dark setting"), |ui| {
-                let options = [
-                    (ThemePreference::System, Some(Icon::Monitor), "System"),
-                    (ThemePreference::Light, Some(Icon::Sun), "Light"),
-                    (ThemePreference::Dark, Some(Icon::Moon), "Dark"),
-                ];
-                if widgets::segmented(ui, p, &mut app.settings.ui.theme, &options) {
-                    app.mark_settings_dirty();
-                }
-            });
-            ui.separator();
-            let mut custom = app.settings.ui.custom_titlebar;
-            setting_row(ui, p, "RusTone title bar", Some("Draw a modern title bar instead of the system frame"), |ui| {
-                if widgets::toggle(ui, p, &mut custom, "RusTone title bar").changed() {
-                    app.settings.ui.custom_titlebar = custom;
-                    app.mark_settings_dirty();
-                    // Window decorations are fixed when the window is created.
-                    app.reopen_window(ui.ctx());
-                }
-            });
-        });
-
-        ui.add_space(12.0);
-        section_title(ui, p, "Behaviour");
-        card(ui, p, |ui| {
-            let mut close_to_tray = app.settings.ui.close_to_tray;
-            setting_row(ui, p, "Keep running in the tray", Some("Closing the window keeps RusTone ready for calls"), |ui| {
-                if widgets::toggle(ui, p, &mut close_to_tray, "Keep running in the tray").changed() {
-                    app.settings.ui.close_to_tray = close_to_tray;
-                    app.mark_settings_dirty();
-                }
-            });
-            ui.separator();
-            let mut start_minimized = app.settings.ui.start_minimized;
-            setting_row(ui, p, "Start minimised", Some("Open in the tray without showing the window"), |ui| {
-                if widgets::toggle(ui, p, &mut start_minimized, "Start minimised").changed() {
-                    app.settings.ui.start_minimized = start_minimized;
-                    app.mark_settings_dirty();
-                }
-            });
-            ui.separator();
-            start_with_windows(ui, app, p);
-            ui.separator();
-            let mut links = *app.ui.links_handled.get_or_insert_with(crate::urlhandler::registered);
-            setting_row(ui, p, "Open sip:, tel: and callto: links", Some("Calls start in RusTone from browsers and other apps"), |ui| {
-                if widgets::toggle(ui, p, &mut links, "Open sip:, tel: and callto: links").changed() {
-                    match crate::urlhandler::set(links) {
-                        Ok(()) => app.ui.links_handled = Some(crate::urlhandler::registered()),
-                        Err(e) => app.notify(format!("Couldn't change the link handler: {e}")),
-                    }
-                }
-            });
-            if links && ui.link(egui::RichText::new("Another app still opens them? Choose RusTone in Windows' Default apps").size(12.0)).clicked() {
-                let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
-            }
-        });
-
-        ui.add_space(12.0);
-        section_title(ui, p, "Developer");
-        card(ui, p, |ui| {
-            setting_row(ui, p, "Debug window", Some("Logs, SIP messages, RTP statistics and audio graphs (Ctrl+Shift+D)"), |ui| {
-                let label = if app.debug.open { "Close" } else { "Open" };
-                if ui.button(label).clicked() {
-                    let open = !app.debug.open;
-                    crate::ui::debug::set_open(app, open);
-                }
-            });
-        });
-
-        ui.add_space(12.0);
-        section_title(ui, p, "About");
-        card(ui, p, |ui| {
-            setting_row(ui, p, &format!("RusTone {}", env!("CARGO_PKG_VERSION")), Some("pjproject 2.17 · egui · fastframe"), |_| {});
-        });
-        ui.add_space(8.0);
+        let status = match &app.directory.status {
+            Some(s) => s.clone(),
+            None if app.settings.sip.users_directory.trim().is_empty() => "Its contacts are added and kept up to date; yours are never changed.".to_owned(),
+            None => "Loading…".to_owned(),
+        };
+        ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
     });
+}
+
+fn calls(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let calls = &mut app.settings.calls;
+        let mut changed = false;
+        setting_stack(ui, p, "DTMF", Some("How keypad digits are sent during a call"), |ui| {
+            egui::ComboBox::from_id_salt("dtmf-method")
+                .width(ui.available_width())
+                .selected_text(dtmf_label(calls.dtmf_method))
+                .show_ui(ui, |ui| {
+                    for method in [DtmfMethod::Auto, DtmfMethod::Rfc2833, DtmfMethod::InBand, DtmfMethod::SipInfo] {
+                        changed |= ui.selectable_value(&mut calls.dtmf_method, method, dtmf_label(method)).changed();
+                    }
+                });
+        });
+        ui.separator();
+        setting_stack(ui, p, "Reject calls", Some("Incoming calls refused with 486 Busy"), |ui| {
+            egui::ComboBox::from_id_salt("deny-incoming")
+                .width(ui.available_width())
+                .selected_text(deny_label(calls.deny_incoming))
+                .show_ui(ui, |ui| {
+                    for mode in [DenyIncoming::Off, DenyIncoming::All, DenyIncoming::OtherUser, DenyIncoming::OtherDomain, DenyIncoming::RemoteDomain, DenyIncoming::OtherUserOrDomain] {
+                        changed |= ui.selectable_value(&mut calls.deny_incoming, mode, deny_label(mode)).changed();
+                    }
+                });
+        });
+        ui.separator();
+        changed |= seconds_row(ui, p, "Hang up calls after", Some("0 for never"), &mut calls.auto_hangup, 0..=86_400);
+        ui.add_space(4.0);
+        ui.separator();
+        for (value, title, description) in [
+            (&mut calls.dnd, "Do not disturb", Some("Refuse incoming calls. Also under the status pill and in the tray")),
+            (&mut calls.local_dtmf, "Call sounds", Some("Keypad tones, call-waiting beep and hang-up sound")),
+            (&mut calls.call_waiting, "Call waiting", Some("Accept a second call during a call")),
+            (&mut calls.bring_to_front, "Show window for incoming calls", None),
+            (&mut calls.media_keys, "Media keys and headset buttons", Some("Play answers or holds, stop hangs up, during calls")),
+            (&mut calls.headset, "USB headset controls", Some("Hook switch answers and hangs up, mute and redial buttons, headset lights")),
+        ] {
+            setting_row(ui, p, title, description, |ui| {
+                changed |= widgets::toggle(ui, p, value, title).changed();
+            });
+        }
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn auto_answer(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let calls = &mut app.settings.calls;
+        let mut changed = false;
+        for (value, title, description) in [
+            (&mut calls.auto_answer, "Answer every call", Some("Also under the status pill and in the tray")),
+            (&mut calls.auto_answer_on_request, "Answer when the caller asks", Some("X-AUTOANSWER or Call-Info answer-after (intercom, paging)")),
+        ] {
+            setting_row(ui, p, title, description, |ui| {
+                changed |= widgets::toggle(ui, p, value, title).changed();
+            });
+        }
+        ui.separator();
+        changed |= seconds_row(ui, p, "Ring first for", Some("0 answers at once"), &mut calls.auto_answer_delay, 0..=600);
+        changed |= widgets::text_field(ui, p, "Only these callers", "Everyone (e.g. 100;2*;+9133*)", &mut calls.auto_answer_numbers).changed();
+        ui.add_space(4.0);
+        setting_stack(ui, p, "While in another call", None, |ui| {
+            egui::ComboBox::from_id_salt("auto-answer-when")
+                .width(ui.available_width())
+                .selected_text(auto_answer_when_label(calls.auto_answer_when))
+                .show_ui(ui, |ui| {
+                    for when in [AutoAnswerWhen::NoOtherCalls, AutoAnswerWhen::OthersOnHold, AutoAnswerWhen::Always] {
+                        changed |= ui.selectable_value(&mut calls.auto_answer_when, when, auto_answer_when_label(when)).changed();
+                    }
+                });
+        });
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn forwarding(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let calls = &mut app.settings.calls;
+        let mut changed = false;
+        setting_row(ui, p, "Forward calls", Some("Sends callers on with a 302. Also under the status pill and in the tray"), |ui| {
+            changed |= widgets::toggle(ui, p, &mut calls.forwarding, "Forward calls").changed();
+        });
+        ui.separator();
+        changed |= widgets::text_field(ui, p, "Forward to", "Number or SIP address", &mut calls.forwarding_number).changed();
+        ui.add_space(4.0);
+        changed |= seconds_row(ui, p, "Ring first for", Some("0 forwards without ringing"), &mut calls.forwarding_delay, 0..=600);
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn speed_dial_section(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| speed_dial(ui, app, p));
+}
+
+fn recording(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let recording = &mut app.settings.recording;
+        let mut changed = false;
+        for (value, title, description) in [
+            (&mut recording.button, "Record button", Some("Show Record in the call controls")),
+            (&mut recording.auto, "Record every call", Some("Starts when a call is answered")),
+        ] {
+            setting_row(ui, p, title, description, |ui| {
+                changed |= widgets::toggle(ui, p, value, title).changed();
+            });
+        }
+        ui.separator();
+        let shown = recording.dir().display().to_string();
+        ui.label(egui::RichText::new("Folder").size(12.0).color(p.secondary));
+        ui.add(egui::Label::new(egui::RichText::new(&shown).size(12.5).color(p.text)).wrap());
+        ui.horizontal(|ui| {
+            if ui.button("Change…").clicked()
+                && let Some(folder) = rfd::FileDialog::new().set_title("Recordings folder").set_directory(recording.dir()).pick_folder()
+            {
+                recording.folder = folder.display().to_string();
+                changed = true;
+            }
+            if !recording.folder.is_empty() && ui.button("Use default").clicked() {
+                recording.folder.clear();
+                changed = true;
+            }
+            if ui.button("Open").clicked() {
+                let dir = recording.dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+            }
+        });
+        ui.label(egui::RichText::new("Recordings are WAV files with both sides of the call.").size(12.0).color(p.dim));
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn feature_codes(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let calls = &mut app.settings.calls;
+        let mut changed = false;
+        ui.label(egui::RichText::new("Codes your PBX understands, sent before a number.").size(12.0).color(p.dim));
+        changed |= widgets::text_field(ui, p, "Call pickup (empty for off)", "**", &mut calls.pickup_code).changed();
+        ui.add_space(6.0);
+        setting_row(ui, p, "Transfer with a code", Some("Dial the code and number in the call instead of a SIP transfer"), |ui| {
+            changed |= widgets::toggle(ui, p, &mut calls.use_transfer_code, "Transfer with a code").changed();
+        });
+        if calls.use_transfer_code {
+            changed |= widgets::text_field(ui, p, "Transfer code", "##", &mut calls.transfer_code).changed();
+        }
+        ui.separator();
+        setting_row(ui, p, "Attended transfer with a code", Some("Adds an attended transfer button to the transfer panel"), |ui| {
+            changed |= widgets::toggle(ui, p, &mut calls.use_attended_code, "Attended transfer with a code").changed();
+        });
+        if calls.use_attended_code {
+            changed |= widgets::text_field(ui, p, "Attended transfer code", "*2", &mut calls.attended_code).changed();
+        }
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn command_hooks(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let hooks = &mut app.settings.hooks;
+        let set = [&hooks.outgoing_call, &hooks.incoming_call, &hooks.call_ring, &hooks.call_answer, &hooks.call_answer_video, &hooks.call_start, &hooks.call_busy, &hooks.call_end]
+            .iter()
+            .filter(|h| !h.trim().is_empty())
+            .count();
+        let summary = match set {
+            0 => "Programs to run on call events. None set.".to_owned(),
+            1 => "Programs to run on call events. 1 set.".to_owned(),
+            n => format!("Programs to run on call events. {n} set."),
+        };
+        // Folded away: eight fields most people never use.
+        let open = app.ui.hooks_open;
+        setting_row(ui, p, &summary, None, |ui| {
+            if ui.button(if open { "Done" } else { "Edit hooks" }).clicked() {
+                app.ui.hooks_open = !open;
+            }
+        });
+        if !open {
+            return;
+        }
+        ui.label(egui::RichText::new("{number}, {name}, {callid}, {direction}, {duration} and {time} are filled in; without them the number is added at the end.").size(12.0).color(p.dim));
+        let mut changed = false;
+        for (value, label) in [
+            (&mut hooks.outgoing_call, "Outgoing call"),
+            (&mut hooks.incoming_call, "Incoming call"),
+            (&mut hooks.call_ring, "Ringing"),
+            (&mut hooks.call_answer, "Answered (incoming)"),
+            (&mut hooks.call_answer_video, "Answered with video"),
+            (&mut hooks.call_start, "Call started"),
+            (&mut hooks.call_busy, "Busy or declined"),
+            (&mut hooks.call_end, "Call ended"),
+        ] {
+            changed |= widgets::text_field(ui, p, label, "Command line", value).changed();
+            ui.add_space(4.0);
+        }
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn features(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
+        let features = &mut app.settings.features;
+        let mut changed = false;
+        for (value, title, description) in [
+            (&mut features.presence, "Presence", "See when contacts are busy or on the phone (SUBSCRIBE)"),
+            (&mut features.messages, "Messages", "Send and receive text messages (MESSAGE)"),
+            (&mut features.transfer, "Call transfer", "Pass a call on to another number (REFER)"),
+            (&mut features.video, "Video calls", "Make and answer calls with video"),
+        ] {
+            setting_row(ui, p, title, Some(description), |ui| {
+                changed |= widgets::toggle(ui, p, value, title).changed();
+            });
+        }
+        if changed {
+            app.mark_settings_dirty();
+        }
+    });
+}
+
+fn appearance(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        setting_stack(ui, p, "Theme", Some("System follows the Windows light/dark setting"), |ui| {
+            let options = [
+                (ThemePreference::System, Some(Icon::Monitor), "System"),
+                (ThemePreference::Light, Some(Icon::Sun), "Light"),
+                (ThemePreference::Dark, Some(Icon::Moon), "Dark"),
+            ];
+            if widgets::segmented(ui, p, &mut app.settings.ui.theme, &options) {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.separator();
+        let mut custom = app.settings.ui.custom_titlebar;
+        setting_row(ui, p, "RusTone title bar", Some("Draw a modern title bar instead of the system frame"), |ui| {
+            if widgets::toggle(ui, p, &mut custom, "RusTone title bar").changed() {
+                app.settings.ui.custom_titlebar = custom;
+                app.mark_settings_dirty();
+                // Window decorations are fixed when the window is created.
+                app.reopen_window(ui.ctx());
+            }
+        });
+    });
+}
+
+fn behaviour(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        let mut close_to_tray = app.settings.ui.close_to_tray;
+        setting_row(ui, p, "Keep running in the tray", Some("Closing the window keeps RusTone ready for calls"), |ui| {
+            if widgets::toggle(ui, p, &mut close_to_tray, "Keep running in the tray").changed() {
+                app.settings.ui.close_to_tray = close_to_tray;
+                app.mark_settings_dirty();
+            }
+        });
+        ui.separator();
+        let mut start_minimized = app.settings.ui.start_minimized;
+        setting_row(ui, p, "Start minimised", Some("Open in the tray without showing the window"), |ui| {
+            if widgets::toggle(ui, p, &mut start_minimized, "Start minimised").changed() {
+                app.settings.ui.start_minimized = start_minimized;
+                app.mark_settings_dirty();
+            }
+        });
+        ui.separator();
+        start_with_windows(ui, app, p);
+        ui.separator();
+        let mut links = *app.ui.links_handled.get_or_insert_with(crate::urlhandler::registered);
+        setting_row(ui, p, "Open sip:, tel: and callto: links", Some("Calls start in RusTone from browsers and other apps"), |ui| {
+            if widgets::toggle(ui, p, &mut links, "Open sip:, tel: and callto: links").changed() {
+                match crate::urlhandler::set(links) {
+                    Ok(()) => app.ui.links_handled = Some(crate::urlhandler::registered()),
+                    Err(e) => app.notify(format!("Couldn't change the link handler: {e}")),
+                }
+            }
+        });
+        if links && ui.link(egui::RichText::new("Another app still opens them? Choose RusTone in Windows' Default apps").size(12.0)).clicked() {
+            let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
+        }
+    });
+}
+
+fn developer(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        setting_row(ui, p, "Debug window", Some("Logs, SIP messages, RTP statistics and audio graphs (Ctrl+Shift+D)"), |ui| {
+            let label = if app.debug.open { "Close" } else { "Open" };
+            if ui.button(label).clicked() {
+                let open = !app.debug.open;
+                crate::ui::debug::set_open(app, open);
+            }
+        });
+    });
+}
+
+fn about(ui: &mut Ui, _app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        setting_row(ui, p, &format!("RusTone {}", env!("CARGO_PKG_VERSION")), Some("pjproject 2.17 · egui · fastframe"), |_| {});
+    });
+}
+
+/// A number of seconds on one row with its title.
+fn seconds_row(ui: &mut Ui, p: &Palette, title: &str, description: Option<&str>, value: &mut u32, range: std::ops::RangeInclusive<u32>) -> bool {
+    let mut changed = false;
+    setting_row(ui, p, title, description, |ui| {
+        changed = ui.add(egui::DragValue::new(value).range(range).suffix(" s").speed(1.0)).on_hover_text(title).changed();
+    });
+    changed
 }
 
 fn auto_answer_when_label(when: AutoAnswerWhen) -> &'static str {
@@ -524,9 +529,6 @@ fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
         if available.is_empty() {
             ui.label(egui::RichText::new("The full codec list appears once the SIP engine has started.").size(12.0).color(p.dim));
         }
-        ui.add_space(4.0);
-        ui.separator();
-        processing(ui, app, p, &available);
         if app.sip.calls.live_count() > 0 {
             ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
         }
@@ -697,5 +699,291 @@ fn video(ui: &mut Ui, app: &mut App, p: &Palette) {
     });
     if changed {
         app.mark_settings_dirty();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The settings window: tabs of sections, in as many columns as fit.
+
+/// The settings sections, in reading order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Section {
+    Accounts,
+    Calls,
+    AutoAnswer,
+    Forwarding,
+    FeatureCodes,
+    SpeedDial,
+    AudioDevices,
+    AudioCodecs,
+    AudioProcessing,
+    Video,
+    Recording,
+    UsersDirectory,
+    Features,
+    Behaviour,
+    Appearance,
+    CommandHooks,
+    Developer,
+    About,
+}
+
+/// The settings window's tabs; each fits its window without scrolling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Tab {
+    #[default]
+    General,
+    Calls,
+    AudioVideo,
+}
+
+impl Tab {
+    const ALL: [Self; 3] = [Self::General, Self::Calls, Self::AudioVideo];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Calls => "Calls",
+            Self::AudioVideo => "Audio & video",
+        }
+    }
+}
+
+impl Section {
+    fn tab(self) -> Tab {
+        match self {
+            Self::Accounts | Self::UsersDirectory | Self::Features | Self::Behaviour | Self::Appearance | Self::Developer | Self::About => Tab::General,
+            Self::Calls | Self::AutoAnswer | Self::Forwarding | Self::FeatureCodes | Self::SpeedDial | Self::Recording | Self::CommandHooks => Tab::Calls,
+            Self::AudioDevices | Self::AudioCodecs | Self::AudioProcessing | Self::Video => Tab::AudioVideo,
+        }
+    }
+
+    const ALL: [Self; 18] = [
+        Self::Accounts,
+        Self::Calls,
+        Self::AutoAnswer,
+        Self::Forwarding,
+        Self::FeatureCodes,
+        Self::SpeedDial,
+        Self::AudioDevices,
+        Self::AudioCodecs,
+        Self::AudioProcessing,
+        Self::Video,
+        Self::Recording,
+        Self::UsersDirectory,
+        Self::Features,
+        Self::Behaviour,
+        Self::Appearance,
+        Self::CommandHooks,
+        Self::Developer,
+        Self::About,
+    ];
+
+    fn title(self) -> Option<&'static str> {
+        Some(match self {
+            // The accounts list has its own heading.
+            Self::Accounts => return None,
+            Self::Calls => "Calls",
+            Self::AutoAnswer => "Auto-answer",
+            Self::Forwarding => "Forwarding",
+            Self::FeatureCodes => "Feature codes",
+            Self::SpeedDial => "Speed dial",
+            Self::AudioDevices => "Audio devices",
+            Self::AudioCodecs => "Audio codecs",
+            Self::AudioProcessing => "Audio processing",
+            Self::Video => "Video",
+            Self::Recording => "Recording",
+            Self::UsersDirectory => "Users directory",
+            Self::Features => "Features",
+            Self::Behaviour => "Behaviour",
+            Self::Appearance => "Appearance",
+            Self::CommandHooks => "Command hooks",
+            Self::Developer => "Developer",
+            Self::About => "About",
+        })
+    }
+
+    /// A first guess at its height, until it has been drawn once.
+    fn estimate(self) -> f32 {
+        match self {
+            Self::Calls | Self::CommandHooks => 560.0,
+            Self::AudioCodecs => 460.0,
+            Self::AutoAnswer | Self::AudioDevices | Self::Behaviour => 340.0,
+            Self::Video | Self::Recording | Self::Features | Self::FeatureCodes | Self::AudioProcessing => 260.0,
+            Self::Accounts | Self::Forwarding | Self::Appearance => 200.0,
+            Self::SpeedDial | Self::UsersDirectory => 140.0,
+            Self::Developer | Self::About => 80.0,
+        }
+    }
+
+    fn draw(self, ui: &mut Ui, app: &mut App, p: &Palette) {
+        if let Some(title) = self.title() {
+            section_title(ui, p, title);
+        }
+        match self {
+            Self::Accounts => super::accounts::list(ui, app, p),
+            Self::Calls => calls(ui, app, p),
+            Self::AutoAnswer => auto_answer(ui, app, p),
+            Self::Forwarding => forwarding(ui, app, p),
+            Self::FeatureCodes => feature_codes(ui, app, p),
+            Self::SpeedDial => speed_dial_section(ui, app, p),
+            Self::AudioDevices => audio_devices(ui, app, p),
+            Self::AudioCodecs => codecs(ui, app, p),
+            Self::AudioProcessing => {
+                let available: Vec<String> = app.sip.codecs.iter().map(|c| c.id.clone()).collect();
+                card(ui, p, |ui| processing(ui, app, p, &available));
+            }
+            Self::Video => video(ui, app, p),
+            Self::Recording => recording(ui, app, p),
+            Self::UsersDirectory => users_directory(ui, app, p),
+            Self::Features => features(ui, app, p),
+            Self::Behaviour => behaviour(ui, app, p),
+            Self::Appearance => appearance(ui, app, p),
+            Self::CommandHooks => command_hooks(ui, app, p),
+            Self::Developer => developer(ui, app, p),
+            Self::About => about(ui, app, p),
+        }
+    }
+}
+
+/// Narrowest a column gets.
+const COLUMN_MIN: f32 = 300.0;
+const COLUMN_GAP: f32 = 20.0;
+
+/// Which section goes in which column. Placed by measured heights and then
+/// kept, so sections don't move while their contents change; placed again
+/// when the number of columns changes.
+#[derive(Debug, Default)]
+pub struct Layout {
+    columns: Vec<Vec<Section>>,
+    heights: std::collections::HashMap<Section, f32>,
+    /// Placed with measured heights (not estimates).
+    settled: bool,
+}
+
+impl Layout {
+    fn place(&mut self, sections: &[Section], count: usize) {
+        let mut columns = vec![Vec::new(); count];
+        let mut filled = vec![0.0f32; count];
+        for &section in sections {
+            // The shortest column so far takes it (masonry, in order).
+            let (i, _) = filled.iter().enumerate().fold((0, f32::MAX), |best, (i, &h)| if h < best.1 { (i, h) } else { best });
+            columns[i].push(section);
+            filled[i] += self.heights.get(&section).copied().unwrap_or_else(|| section.estimate()) + COLUMN_GAP;
+        }
+        self.columns = columns;
+    }
+}
+
+/// A tab's sections, in columns as the width allows.
+fn sections(ui: &mut Ui, app: &mut App, p: &Palette, tab: Tab) {
+    let shown: Vec<Section> = Section::ALL.into_iter().filter(|s| s.tab() == tab && (*s != Section::Video || app.settings.features.video)).collect();
+    let width = ui.available_width();
+    let count = (((width + COLUMN_GAP) / (COLUMN_MIN + COLUMN_GAP)).floor() as usize).clamp(1, shown.len());
+    let mut layout = app.ui.settings_layout.remove(&tab).unwrap_or_default();
+    let measured = shown.iter().all(|s| layout.heights.contains_key(s));
+    let flat: Vec<Section> = layout.columns.iter().flatten().copied().collect();
+    let same_sections = flat.len() == shown.len() && shown.iter().all(|s| flat.contains(s));
+    if layout.columns.len() != count || !same_sections {
+        layout.place(&shown, count);
+        layout.settled = measured;
+    } else if !layout.settled && measured {
+        layout.place(&shown, count);
+        layout.settled = true;
+    }
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        ui.columns(count, |cols| {
+            for (col, sections) in cols.iter_mut().zip(&layout.columns) {
+                for &section in sections {
+                    let drawn = col.scope(|ui| section.draw(ui, app, p));
+                    layout.heights.insert(section, drawn.response.rect.height());
+                    col.add_space(COLUMN_GAP);
+                }
+            }
+        });
+    });
+    app.ui.settings_layout.insert(tab, layout);
+}
+
+/// The settings window's id, to open or bring it forward.
+pub fn window_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("rustone-settings")
+}
+
+/// Shows the settings window while it's open: the sections, or the account
+/// editor while an account is being edited. Called every frame of the main
+/// window, from `logic`.
+pub fn show_window(ctx: &egui::Context, app: &mut App) {
+    if !app.ui.settings_open {
+        return;
+    }
+    let p = app.palette().clone();
+    // Most of the screen, so the columns fit without scrolling.
+    let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1600.0, 900.0));
+    let size = [(monitor.x * 0.9).min(1800.0), (monitor.y * 0.88).min(1040.0)];
+    let builder = egui::ViewportBuilder::default()
+        .with_title("RusTone Settings")
+        .with_app_id("rustone-settings")
+        .with_icon(crate::icons::window_icon())
+        .with_inner_size(size)
+        .with_min_inner_size([420.0, 480.0]);
+    ctx.show_viewport_immediate(window_id(), builder, |ui, _class| {
+        if ui.input(|i| i.viewport().close_requested()) {
+            app.ui.settings_open = false;
+            return;
+        }
+        let frame = egui::Frame::new().fill(p.window).inner_margin(egui::Margin::symmetric(20, 16));
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            if app.ui.account_draft.is_some() {
+                // The editor, in a column of its own width.
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.set_max_width(560.0);
+                    super::accounts::editor(ui, app, &p);
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.heading("Settings");
+                    ui.add_space(24.0);
+                    // Tabs, each fitting the window.
+                    let mut tab = app.ui.settings_tab;
+                    for t in Tab::ALL {
+                        let selected = tab == t;
+                        let text = egui::RichText::new(t.label()).size(14.0).color(if selected { p.accent } else { p.secondary });
+                        if ui.add(egui::Button::new(text).selected(selected).min_size(egui::vec2(0.0, 30.0))).clicked() {
+                            tab = t;
+                        }
+                    }
+                    app.ui.settings_tab = tab;
+                });
+                ui.add_space(10.0);
+                let tab = app.ui.settings_tab;
+                sections(ui, app, &p, tab);
+            }
+        });
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections_go_to_the_shortest_column_in_order() {
+        let mut layout = Layout::default();
+        for (section, height) in [(Section::Calls, 500.0), (Section::AutoAnswer, 300.0), (Section::Forwarding, 200.0), (Section::SpeedDial, 100.0)] {
+            layout.heights.insert(section, height);
+        }
+        layout.place(&[Section::Calls, Section::AutoAnswer, Section::Forwarding, Section::SpeedDial], 2);
+        // Calls fills the first column; the others stack in the second until it's as tall.
+        assert_eq!(layout.columns, vec![vec![Section::Calls, Section::SpeedDial], vec![Section::AutoAnswer, Section::Forwarding]]);
+        layout.place(&[Section::Calls, Section::AutoAnswer], 1);
+        assert_eq!(layout.columns, vec![vec![Section::Calls, Section::AutoAnswer]]);
+    }
+
+    #[test]
+    fn every_section_has_a_tab() {
+        for tab in Tab::ALL {
+            assert!(Section::ALL.iter().any(|s| s.tab() == tab), "{tab:?} is empty");
+        }
     }
 }

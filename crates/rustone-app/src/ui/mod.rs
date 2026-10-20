@@ -7,7 +7,7 @@ mod history;
 mod messages;
 pub mod debug;
 mod dialer;
-mod settings;
+pub(crate) mod settings;
 #[cfg(test)]
 mod test_support;
 pub mod video;
@@ -35,9 +35,6 @@ pub enum Page {
     Calls,
     Contacts,
     Messages,
-    Settings,
-    /// The account editor (reached from Settings).
-    Account,
     /// The contact editor (reached from Contacts).
     Contact,
 }
@@ -46,6 +43,14 @@ pub enum Page {
 #[derive(Debug, Default)]
 pub struct UiState {
     pub page: Page,
+    /// The settings window is open.
+    pub settings_open: bool,
+    /// The command hooks' fields are showing in Settings.
+    pub hooks_open: bool,
+    /// The settings window's tab.
+    pub settings_tab: settings::Tab,
+    /// How each tab's sections sit in its columns.
+    pub settings_layout: std::collections::HashMap<settings::Tab, settings::Layout>,
     /// Whether links open RusTone, read from the registry when Settings opens.
     pub links_handled: Option<bool>,
     /// Two-number speed-dial buttons whose next press uses the second.
@@ -123,8 +128,6 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                 }
                 Page::Contacts => contacts::show(ui, app, &p),
                 Page::Messages => messages::show(ui, app, &p),
-                Page::Settings => settings::show(ui, app, &p),
-                Page::Account => accounts::editor(ui, app, &p),
                 Page::Contact => contacts::editor(ui, app, &p),
             }
             notice(ui, app, &p);
@@ -268,10 +271,11 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
-            let in_settings = matches!(app.ui.page, Page::Settings | Page::Account);
-            let settings_tint = if in_settings { p.accent } else { p.secondary };
+            // Settings open in a window of their own; a second press brings it forward.
+            let open = app.ui.settings_open;
+            let settings_tint = if open { p.accent } else { p.secondary };
             if widgets::icon_button(ui, p, Icon::Settings, settings_tint, "Settings").clicked() {
-                app.ui.page = if in_settings { Page::Dialer } else { Page::Settings };
+                open_settings(ui.ctx(), app);
             }
         });
     });
@@ -472,6 +476,15 @@ fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
             Weight::Medium.font_id(11.0),
             tint,
         );
+    }
+}
+
+/// Opens the settings window, or brings it forward when it's open.
+pub fn open_settings(ctx: &egui::Context, app: &mut App) {
+    if app.ui.settings_open {
+        ctx.send_viewport_cmd_to(settings::window_id(), egui::ViewportCommand::Focus);
+    } else {
+        app.ui.settings_open = true;
     }
 }
 
