@@ -88,6 +88,7 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                 (&mut calls.call_waiting, "Call waiting", Some("Accept a second call during a call")),
                 (&mut calls.bring_to_front, "Show window for incoming calls", None),
                 (&mut calls.media_keys, "Media keys and headset buttons", Some("Play answers or holds, stop hangs up, during calls")),
+                (&mut calls.headset, "USB headset controls", Some("Hook switch answers and hangs up, mute and redial buttons, headset lights")),
             ] {
                 setting_row(ui, p, title, description, |ui| {
                     changed |= widgets::toggle(ui, p, value, title).changed();

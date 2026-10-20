@@ -41,6 +41,7 @@ jiff = "0.2"
 rfd = "0.17.2"
 ureq = "3.4.2"
 user-idle = "0.6.0"
+hidapi = "2.6.7"
 
 [dev-dependencies]
 egui_kittest = "0.36.1"

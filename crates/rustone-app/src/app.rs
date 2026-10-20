@@ -101,6 +101,8 @@ pub struct App {
     pub start_at_login: crate::autostart::StartAtLogin,
     /// Media keys during calls, while that's on.
     media_keys: Option<crate::media_keys::MediaKeys>,
+    /// The USB headset worker, while headsets are on.
+    headset: Option<crate::headset::Headset>,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -181,6 +183,7 @@ impl App {
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
             media_keys: None,
+            headset: None,
             start_at_login: {
                 let wake = waker.clone();
                 let start = crate::autostart::StartAtLogin::new(move || wake.wake());
@@ -290,6 +293,53 @@ impl App {
             }
         }
         raise
+    }
+
+    /// A USB headset's buttons and lights.
+    fn headset(&mut self) {
+        use crate::headset::{Button, Headset, Lights};
+        if !self.settings.calls.headset {
+            self.headset = None;
+            return;
+        }
+        let waker = self.waker.clone();
+        let headset = self.headset.get_or_insert_with(|| Headset::start(move || waker.wake()));
+        let calls = &self.sip.calls;
+        let ringing: Vec<_> = calls.visible().filter(|c| c.is_ringing_in()).map(crate::calls::Call::id).collect();
+        let talking: Vec<_> = calls.visible().filter(|c| c.is_live() && !c.is_ringing_in()).map(crate::calls::Call::id).collect();
+        headset.show(Lights { off_hook: !talking.is_empty(), ring: !ringing.is_empty(), mute: calls.mic_muted });
+        for button in headset.buttons() {
+            match button {
+                // Picked up: answer, or call what's on the dialer.
+                Button::Hook(true) => {
+                    if let Some(&id) = ringing.first() {
+                        self.act(|c| c.answer(id, false));
+                    } else if talking.is_empty() && !self.ui.dialer.number.trim().is_empty() {
+                        let number = self.ui.dialer.number.trim().to_owned();
+                        crate::ui::dial(self, &number, false);
+                    }
+                }
+                // Put down: hang up the calls, or decline a ringing one.
+                Button::Hook(false) => {
+                    if !talking.is_empty() {
+                        self.sip.run(talking.iter().copied().map(sip_engine::Command::Hangup).collect());
+                    } else if let Some(&id) = ringing.first() {
+                        self.act(|c| c.decline(id));
+                    }
+                }
+                Button::Mute(mute) => {
+                    if mute != self.sip.calls.mic_muted {
+                        self.act(crate::calls::CallBook::toggle_mic);
+                    }
+                }
+                Button::Redial => {
+                    let last = self.phonebook.calls.iter().find(|r| r.kind == rustone_core::history::CallKind::Outgoing).map(|r| r.number.clone());
+                    if let Some(number) = last.filter(|_| talking.is_empty()) {
+                        crate::ui::dial(self, &number, false);
+                    }
+                }
+            }
+        }
     }
 
     /// Acts on a command-line verb. Returns true
@@ -737,6 +787,7 @@ impl App {
             }
         }
         show |= self.media_keys();
+        self.headset();
         let requests = std::mem::take(&mut *self.requests.lock().unwrap_or_else(|e| e.into_inner()));
         for request in requests {
             match request {

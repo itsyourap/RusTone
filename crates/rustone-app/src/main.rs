@@ -7,6 +7,7 @@ mod app;
 mod autostart;
 mod calls;
 mod directory;
+mod headset;
 mod hookrun;
 mod icons;
 mod idle;

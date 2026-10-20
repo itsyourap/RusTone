@@ -189,6 +189,9 @@ pub struct CallSettings {
     /// Media keys and headset buttons answer, hold and hang up during
     /// calls.
     pub media_keys: bool,
+    /// USB telephony headsets: hook switch, mute and redial buttons, and
+    /// their lights.
+    pub headset: bool,
 }
 
 /// When auto-answer may answer while other calls exist.
@@ -344,6 +347,7 @@ impl Default for CallSettings {
             forwarding_delay: 0,
             auto_hangup: 0,
             media_keys: false,
+            headset: false,
         }
     }
 }
