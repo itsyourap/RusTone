@@ -156,6 +156,7 @@ impl Sip {
         }
         let account = settings.active().filter(|a| a.is_usable()).map(|a| account_config(a, &settings.sip));
         if self.applied.account.as_ref() != Some(&account) {
+            self.calls.account = settings.active().filter(|a| a.is_usable()).map(|a| rustone_core::rules::Identity { user: a.username.clone(), domain: a.domain.clone() });
             // The engine drops the old account's subscriptions.
             self.presence.clear();
             engine.send(Command::SetAccount(account.clone()));

@@ -75,6 +75,7 @@ pub struct App {
     pub tray: Option<Tray>,
     /// The status (and missed calls) the tray currently shows.
     tray_status: Option<(Status, bool)>,
+    tray_toggles: Option<tray::Toggles>,
     requests: Requests,
     pub sip: Sip,
     pub phonebook: crate::phonebook::Phonebook,
@@ -157,6 +158,7 @@ impl App {
             files: fastframe_file::Writer::new(),
             tray: tray::spawn(move || wake.wake()),
             tray_status: None,
+            tray_toggles: None,
             requests,
             sip,
             phonebook: crate::phonebook::Phonebook::open(&paths.database),
@@ -511,6 +513,13 @@ impl App {
             }
             self.tray_status = Some(shown);
         }
+        let toggles = tray::Toggles::of(&self.settings.calls);
+        if self.tray_toggles != Some(toggles) {
+            if let Some(tray) = &mut self.tray {
+                tray::show_toggles(tray, toggles);
+            }
+            self.tray_toggles = Some(toggles);
+        }
     }
 
     /// Handles tray clicks and requests from other launches. `ctx` is the
@@ -529,6 +538,10 @@ impl App {
                     }
                 }
                 Event::Menu(tray::QUIT) => self.quit(ctx),
+                Event::Menu(tray::DND) => {
+                    self.settings.calls.dnd = !self.settings.calls.dnd;
+                    self.mark_settings_dirty();
+                }
                 Event::Menu(tray::DEBUG) => {
                     show = true;
                     crate::ui::debug::set_open(self, true);

@@ -2,7 +2,7 @@
 //! Settings arrive in Phase 8.
 
 use egui::Ui;
-use rustone_core::settings::{DtmfMethod, ThemePreference};
+use rustone_core::settings::{DenyIncoming, DtmfMethod, ThemePreference};
 
 use super::widgets::{self, card, section_title, setting_row, setting_stack};
 use crate::app::App;
@@ -68,7 +68,19 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     });
             });
             ui.separator();
+            setting_stack(ui, p, "Reject calls", Some("Incoming calls refused with 486 Busy"), |ui| {
+                egui::ComboBox::from_id_salt("deny-incoming")
+                    .width(ui.available_width())
+                    .selected_text(deny_label(calls.deny_incoming))
+                    .show_ui(ui, |ui| {
+                        for mode in [DenyIncoming::Off, DenyIncoming::All, DenyIncoming::OtherUser, DenyIncoming::OtherDomain, DenyIncoming::RemoteDomain, DenyIncoming::OtherUserOrDomain] {
+                            changed |= ui.selectable_value(&mut calls.deny_incoming, mode, deny_label(mode)).changed();
+                        }
+                    });
+            });
+            ui.separator();
             for (value, title, description) in [
+                (&mut calls.dnd, "Do not disturb", Some("Refuse incoming calls. Also under the status pill and in the tray")),
                 (&mut calls.local_dtmf, "Call sounds", Some("Keypad tones, call-waiting beep and hang-up sound")),
                 (&mut calls.call_waiting, "Call waiting", Some("Accept a second call during a call")),
                 (&mut calls.bring_to_front, "Show window for incoming calls", None),
@@ -167,6 +179,17 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(8.0);
     });
+}
+
+fn deny_label(mode: DenyIncoming) -> &'static str {
+    match mode {
+        DenyIncoming::Off => "None",
+        DenyIncoming::All => "All calls",
+        DenyIncoming::OtherUser => "Calls to another user",
+        DenyIncoming::OtherDomain => "Calls to another domain",
+        DenyIncoming::RemoteDomain => "Calls from another domain",
+        DenyIncoming::OtherUserOrDomain => "Calls to another user or domain",
+    }
 }
 
 fn dtmf_label(method: DtmfMethod) -> &'static str {

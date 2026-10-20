@@ -8,6 +8,7 @@ use crate::sip::Status;
 pub const SHOW: &str = "show";
 pub const QUIT: &str = "quit";
 pub const DEBUG: &str = "debug";
+pub const DND: &str = "dnd";
 const STATUS: &str = "status";
 
 /// Creates the tray item. `None` if the platform has no tray.
@@ -23,6 +24,8 @@ pub fn spawn(wake: impl Fn() + Send + Sync + 'static) -> Option<Tray> {
                 // Registration status, kept current by `show_status`.
                 MenuItem::action(STATUS, "Starting…").enabled(false),
                 MenuItem::Separator,
+                MenuItem::action(DND, toggle_label("Do not disturb", false)),
+                MenuItem::Separator,
                 MenuItem::action(SHOW, "Show RusTone"),
                 MenuItem::action(DEBUG, "Debug window"),
                 MenuItem::Separator,
@@ -35,6 +38,27 @@ pub fn spawn(wake: impl Fn() + Send + Sync + 'static) -> Option<Tray> {
         log::warn!("no system tray available; closing the window will quit");
     }
     tray
+}
+
+/// The tray menu has no check marks: a toggle's label carries one.
+fn toggle_label(label: &str, on: bool) -> String {
+    if on { format!("✓  {label}") } else { format!("     {label}") }
+}
+
+/// The call toggles' state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Toggles {
+    pub dnd: bool,
+}
+
+impl Toggles {
+    pub fn of(calls: &rustone_core::settings::CallSettings) -> Self {
+        Self { dnd: calls.dnd }
+    }
+}
+
+pub fn show_toggles(tray: &mut Tray, toggles: Toggles) {
+    tray.set_label(DND, toggle_label("Do not disturb", toggles.dnd));
 }
 
 /// Shows the registration status: menu line, tooltip, a dimmed icon while

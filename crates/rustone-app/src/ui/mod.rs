@@ -18,6 +18,7 @@ use fastframe_fonts::Weight;
 
 use crate::app::App;
 use rustone_core::account::Account;
+use rustone_core::settings::CallSettings;
 use crate::sip::Status;
 use crate::icons::Icon;
 use crate::theme::Palette;
@@ -160,8 +161,16 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (logo, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
         Icon::Phone.image(p.accent, 18.0).paint_at(ui, logo);
         ui.label(egui::RichText::new("RusTone").font(Weight::SemiBold.font_id(16.0)).color(p.text));
-        if let Some(copied) = status_chip(ui, p, &app.status(), app.settings.active()) {
+        let status = app.status();
+        let account = app.settings.active().cloned();
+        let mut calls = app.settings.calls.clone();
+        let chip = status_chip(ui, p, &status, account.as_ref(), &mut calls);
+        if let Some(copied) = chip.copied {
             app.notify(format!("Copied {copied}"));
+        }
+        if calls != app.settings.calls {
+            app.settings.calls = calls;
+            app.mark_settings_dirty();
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -183,17 +192,29 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
+/// What the status pill did.
+#[derive(Default)]
+struct ChipOutcome {
+    /// The number or address copied from its right-click menu.
+    copied: Option<String>,
+}
+
 /// Registration status as a small pill; the account, its number, its SIP
-/// address and any error on hover. Right-click copies the number or the
-/// address; returns what was copied.
-fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>) -> Option<String> {
-    let (dot, text) = match status {
+/// address and any error on hover. Shows "Do not disturb" while that's on.
+/// A click opens the call toggles; right-click copies the number or the
+/// address.
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>, calls: &mut CallSettings) -> ChipOutcome {
+    let (mut dot, text) = match status {
         Status::Online | Status::Ready => (p.success, p.secondary),
         Status::Starting | Status::Connecting => (p.warning, p.secondary),
         Status::Error(_) => (p.danger, p.danger),
         Status::NoAccount | Status::Offline => (p.dim, p.secondary),
     };
-    let label = status.label();
+    let dnd = calls.dnd && status.is_online();
+    if dnd {
+        dot = p.danger;
+    }
+    let label = if dnd { "DND" } else { status.label() };
     let galley = ui.painter().layout_no_wrap(label.to_owned(), Weight::Medium.font_id(11.5), text);
     // Leave room for the settings button; show only the dot when narrow.
     let show_text = ui.available_width() > galley.size().x + 90.0;
@@ -213,8 +234,16 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     if show_text {
         painter.galley(egui::pos2(rect.left() + 19.0, rect.center().y - galley.size().y / 2.0), galley, text);
     }
-    let hover = status_hover(status, account);
+    let mut hover = status_hover(status, account);
+    if calls.dnd {
+        hover.push_str("
+Do not disturb is on");
+    }
     let response = response.on_hover_text(hover);
+    // Its own id: the right-click menu uses the response's.
+    egui::Popup::menu(&response).id(response.id.with("call-toggles")).show(|ui| {
+        widgets::menu(ui, |ui| call_toggles(ui, p, calls));
+    });
     let mut copied = None;
     if let Some(account) = account {
         response.context_menu(|ui| {
@@ -229,7 +258,18 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
             });
         });
     }
-    copied
+    ChipOutcome { copied }
+}
+
+/// The quick call toggles under the status pill.
+fn call_toggles(ui: &mut Ui, p: &Palette, calls: &mut CallSettings) {
+    ui.set_min_width(220.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Do not disturb").color(p.text));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            widgets::toggle(ui, p, &mut calls.dnd, "Do not disturb");
+        });
+    });
 }
 
 /// A count on a tab: missed calls (red), unread messages (accent).
@@ -328,12 +368,27 @@ mod tests {
     }
 
     #[test]
+    fn clicking_the_pill_turns_do_not_disturb_on() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = test_support::harness([300.0, 200.0], CallSettings::default(), |ui, calls| {
+            status_chip(ui, &Palette::dark(), &Status::Online, None, calls);
+        });
+        harness.get_by_label("Online").click();
+        harness.run_steps(2);
+        // The row's label and its switch share the name; press the switch.
+        harness.query_all_by_label("Do not disturb").last().expect("a switch").click();
+        harness.run_steps(2);
+        assert!(harness.state().dnd);
+        assert!(harness.query_by_label("Online").is_none(), "the pill says so instead");
+    }
+
+    #[test]
     fn right_click_copies_the_number_or_address() {
         use egui_kittest::kittest::Queryable;
         for (item, expected) in [("Copy phone number", "+910000000000"), ("Copy full SIP URI", "sip:+910000000000@sip.example.com")] {
             let mut harness = test_support::harness([300.0, 160.0], None::<String>, |ui, copied| {
                 let home = Account { label: "Home".into(), username: "+910000000000@sip.example.com".into(), ..Account::default() };
-                if let Some(c) = status_chip(ui, &Palette::dark(), &Status::Online, Some(&home)) {
+                if let Some(c) = status_chip(ui, &Palette::dark(), &Status::Online, Some(&home), &mut CallSettings::default()).copied {
                     *copied = Some(c);
                 }
             });

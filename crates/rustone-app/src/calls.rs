@@ -189,6 +189,8 @@ pub struct CallBook {
     pub sounds: SoundPaths,
     /// Ringtone level, 0..=1.
     pub ring_level: f32,
+    /// The registering account's user and domain, for the deny rules.
+    pub account: Option<rustone_core::rules::Identity>,
 }
 
 impl CallBook {
@@ -265,18 +267,29 @@ impl CallBook {
         self.calls.retain(|c| c.id() != info.id || c.ended.is_none());
         let mut call = Call::new(info.clone());
         let key = uri_user_host(&info.remote);
+        let local = uri_user_host(&info.local);
+        let addresses = rustone_core::rules::Addresses { local: &local, remote: &key };
         let reject = if self.handled_sip_ids.contains(&info.sip_call_id) {
-            Some(487)
-        } else if self.calls.iter().any(|c| c.is_live() && uri_user_host(&c.info.remote) == key) {
-            Some(486) // "Call already exists"
+            Some((487, ""))
+        } else if self.calls.iter().any(|c| c.is_live() && uri_user_host(&c.info.remote) == key)
+            || (!cfg.call_waiting && self.live_count() > 0)
+            || (cfg.max_concurrent_calls > 0 && self.live_count() >= cfg.max_concurrent_calls as usize)
+        {
+            Some((486, "")) // "Call already exists" / "Active calls limit"
+        } else if cfg.dnd {
+            Some((486, "Do Not Disturb"))
+        } else if rustone_core::rules::denied(cfg.deny_incoming, self.account.as_ref(), addresses) {
+            Some((486, "Denied"))
         } else {
-            let count = self.live_count() + 1;
-            let over = (!cfg.call_waiting && count > 1) || (cfg.max_concurrent_calls > 0 && count > cfg.max_concurrent_calls as usize);
-            over.then_some(486) // "Active calls limit"
+            None
         };
-        if let Some(code) = reject {
+        if let Some((code, reason)) = reject {
             call.hidden = true;
-            out.commands.push(Command::Answer { call: info.id, code, video: false });
+            out.commands.push(if reason.is_empty() {
+                Command::Answer { call: info.id, code, video: false }
+            } else {
+                Command::Respond { call: info.id, code, reason: reason.into(), headers: Vec::new() }
+            });
             self.calls.push(call);
             return;
         }
@@ -614,6 +627,27 @@ mod tests {
         assert_eq!(played(&out), ["ring.wav"]);
         assert!(out.show_window);
         assert_eq!(b.current, Some(1));
+    }
+
+    #[test]
+    fn dnd_and_deny_reject_with_a_reason() {
+        let rejected = |b: &mut CallBook, cfg: &CallSettings, id, remote: &str| {
+            let out = b.on_event(&Event::IncomingCall(info(id, Direction::Incoming, CallState::Incoming, remote)), cfg);
+            assert!(played(&out).is_empty() && !out.show_window, "a rejected call doesn't ring");
+            out.commands.iter().find_map(|c| if let Command::Respond { code, reason, .. } = c { Some((*code, reason.clone())) } else { None })
+        };
+        let mut b = book();
+        let dnd = CallSettings { dnd: true, ..CallSettings::default() };
+        assert_eq!(rejected(&mut b, &dnd, 1, "<sip:100@pbx>"), Some((486, "Do Not Disturb".into())));
+        assert!(!b.has_calls(), "not shown");
+
+        // Calls to another user than the account's (local is me@pbx).
+        let deny = CallSettings { deny_incoming: rustone_core::settings::DenyIncoming::OtherUser, ..CallSettings::default() };
+        b.account = Some(rustone_core::rules::Identity { user: "someone".into(), domain: "pbx".into() });
+        assert_eq!(rejected(&mut b, &deny, 2, "<sip:200@pbx>"), Some((486, "Denied".into())));
+        b.account = Some(rustone_core::rules::Identity { user: "me".into(), domain: "pbx".into() });
+        let out = b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &deny);
+        assert_eq!(answers(&out), [180], "addressed to us: rings");
     }
 
     #[test]

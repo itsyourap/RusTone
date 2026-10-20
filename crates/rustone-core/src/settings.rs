@@ -149,6 +149,30 @@ pub struct CallSettings {
     /// Dialled before a ringing contact's number to pick up its call;
     /// empty turns pickup off.
     pub pickup_code: String,
+    /// Do not disturb: incoming calls get 486 "Do Not Disturb".
+    pub dnd: bool,
+    /// Incoming calls rejected outright.
+    pub deny_incoming: DenyIncoming,
+}
+
+/// Which incoming calls are rejected with 486 "Denied" (its
+/// "button" mode is [`CallSettings::dnd`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DenyIncoming {
+    /// None.
+    #[default]
+    Off,
+    /// Every call.
+    All,
+    /// Calls addressed to another user than the account's (`user`).
+    OtherUser,
+    /// Calls addressed to another domain than the account's (`domain`).
+    OtherDomain,
+    /// Calls from another domain than the account's (`remotedomain`).
+    RemoteDomain,
+    /// Calls addressed to another user or domain (`userdomain`).
+    OtherUserOrDomain,
 }
 
 /// Features a provider may not support, each on unless turned off.
@@ -194,6 +218,8 @@ impl Default for CallSettings {
             bring_to_front: true,
             no_ignore: false,
             pickup_code: "**".into(),
+            dnd: false,
+            deny_incoming: DenyIncoming::Off,
         }
     }
 }
