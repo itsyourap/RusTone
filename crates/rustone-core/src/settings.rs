@@ -149,6 +149,13 @@ pub struct CallSettings {
     /// Dialled before a ringing contact's number to pick up its call;
     /// empty turns pickup off.
     pub pickup_code: String,
+    /// Transfer by sending this code and the number as DTMF, for PBXs that
+    /// transfer that way, instead of a REFER.
+    pub transfer_code: String,
+    pub use_transfer_code: bool,
+    /// Attended transfer by DTMF code and number.
+    pub attended_code: String,
+    pub use_attended_code: bool,
     /// Do not disturb: incoming calls get 486 "Do Not Disturb".
     pub dnd: bool,
     /// Incoming calls rejected outright.
@@ -253,6 +260,10 @@ impl Default for CallSettings {
             bring_to_front: true,
             no_ignore: false,
             pickup_code: "**".into(),
+            transfer_code: "##".into(),
+            use_transfer_code: false,
+            attended_code: "*2".into(),
+            use_attended_code: false,
             dnd: false,
             deny_incoming: DenyIncoming::Off,
             auto_answer: false,

@@ -602,13 +602,43 @@ impl CallBook {
         vec![Command::SendDtmf { call: id, digits: digits.to_owned(), method }]
     }
 
-    pub fn transfer(&self, id: CallId, target: &str) -> Vec<Command> {
-        vec![Command::Transfer { call: id, target: target.to_owned() }]
+    /// Transfers to `target`: a REFER, or the PBX's transfer code and the
+    /// number as DTMF when that's set.
+    pub fn transfer(&self, id: CallId, target: &str, cfg: &CallSettings) -> Vec<Command> {
+        match feature_code(cfg.use_transfer_code, &cfg.transfer_code) {
+            Some(code) => self.dtmf(id, &format!("{code}{}", dial_user(target)), cfg.dtmf_method),
+            None => vec![Command::Transfer { call: id, target: target.to_owned() }],
+        }
+    }
+
+    /// Attended transfer by the PBX's code: the
+    /// PBX calls `target` and connects us when we hang up.
+    pub fn attended_transfer_by_code(&self, id: CallId, target: &str, cfg: &CallSettings) -> Vec<Command> {
+        match feature_code(cfg.use_attended_code, &cfg.attended_code) {
+            Some(code) => self.dtmf(id, &format!("{code}{}", dial_user(target)), cfg.dtmf_method),
+            None => Vec::new(),
+        }
     }
 
     pub fn attended_transfer(&self, id: CallId, with: CallId) -> Vec<Command> {
         vec![Command::AttendedTransfer { call: id, with }]
     }
+}
+
+/// A feature code when it's on and set.
+fn feature_code(on: bool, code: &str) -> Option<&str> {
+    Some(code.trim()).filter(|c| on && !c.is_empty())
+}
+
+/// The number part of a dialled target, for feature codes: the user of a
+/// SIP address, or the target as typed.
+fn dial_user(target: &str) -> String {
+    let target = target.trim();
+    if !target.contains(':') && !target.contains('<') {
+        return target.split('@').next().unwrap_or(target).to_owned();
+    }
+    let user_host = uri_user_host(target);
+    user_host.split('@').next().unwrap_or(&user_host).to_owned()
 }
 
 /// The wording for how a call ended.
@@ -803,6 +833,23 @@ mod tests {
         assert!(matches!(scheduled.as_slice(), [(d, Command::End { call: 1, code: 200, headers })] if *d == Duration::from_secs(60) && headers[0].1.starts_with("399 ")));
         // Only once, not on every later update.
         assert!(!b.on_event(&Event::Call(answered), &cfg).commands.iter().any(|c| matches!(c, Command::Later { .. })));
+    }
+
+    #[test]
+    fn transfers_use_feature_codes_when_set() {
+        let b = book();
+        let dtmf = |cmds: Vec<Command>| cmds.into_iter().find_map(|c| if let Command::SendDtmf { digits, .. } = c { Some(digits) } else { None });
+        let refer = CallSettings::default();
+        assert_eq!(b.transfer(1, "200", &refer), [Command::Transfer { call: 1, target: "200".into() }]);
+        assert!(b.attended_transfer_by_code(1, "200", &refer).is_empty(), "off by default");
+
+        let codes = CallSettings { use_transfer_code: true, use_attended_code: true, ..CallSettings::default() };
+        assert_eq!(dtmf(b.transfer(1, "200", &codes)).as_deref(), Some("##200"));
+        assert_eq!(dtmf(b.transfer(1, "sip:300@pbx", &codes)).as_deref(), Some("##300"));
+        assert_eq!(dtmf(b.attended_transfer_by_code(1, "400@pbx", &codes)).as_deref(), Some("*2400"));
+        // On but empty: a normal transfer.
+        let empty = CallSettings { transfer_code: " ".into(), ..codes };
+        assert_eq!(b.transfer(1, "200", &empty), [Command::Transfer { call: 1, target: "200".into() }]);
     }
 
     #[test]

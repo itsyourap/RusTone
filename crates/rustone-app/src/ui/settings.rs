@@ -147,6 +147,32 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Feature codes");
+        card(ui, p, |ui| {
+            let calls = &mut app.settings.calls;
+            let mut changed = false;
+            ui.label(egui::RichText::new("Codes your PBX understands, sent before a number.").size(12.0).color(p.dim));
+            changed |= widgets::text_field(ui, p, "Call pickup (empty for off)", "**", &mut calls.pickup_code).changed();
+            ui.add_space(6.0);
+            setting_row(ui, p, "Transfer with a code", Some("Dial the code and number in the call instead of a SIP transfer"), |ui| {
+                changed |= widgets::toggle(ui, p, &mut calls.use_transfer_code, "Transfer with a code").changed();
+            });
+            if calls.use_transfer_code {
+                changed |= widgets::text_field(ui, p, "Transfer code", "##", &mut calls.transfer_code).changed();
+            }
+            ui.separator();
+            setting_row(ui, p, "Attended transfer with a code", Some("Adds an attended transfer button to the transfer panel"), |ui| {
+                changed |= widgets::toggle(ui, p, &mut calls.use_attended_code, "Attended transfer with a code").changed();
+            });
+            if calls.use_attended_code {
+                changed |= widgets::text_field(ui, p, "Attended transfer code", "*2", &mut calls.attended_code).changed();
+            }
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Features");
         card(ui, p, |ui| {
             ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));

@@ -389,9 +389,19 @@ fn transfer(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, mut target: St
         let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(6.0);
         let ready = !target.trim().is_empty();
+        let cfg = app.settings.calls.clone();
         if ui.add_enabled(ready, egui::Button::new("Transfer").min_size(vec2(ui.available_width(), 34.0))).clicked() || (enter && ready) {
-            app.act(|c| c.transfer(call.id(), target.trim()));
+            app.act(|c| c.transfer(call.id(), target.trim(), &cfg));
             close = true;
+        }
+        // The PBX's attended transfer: it calls the number, we hang up to connect.
+        if cfg.use_attended_code && !cfg.attended_code.trim().is_empty() {
+            ui.add_space(4.0);
+            let label = format!("Attended transfer ({})", cfg.attended_code.trim());
+            if ui.add_enabled(ready, egui::Button::new(label).min_size(vec2(ui.available_width(), 32.0))).clicked() {
+                app.act(|c| c.attended_transfer_by_code(call.id(), target.trim(), &cfg));
+                close = true;
+            }
         }
         let others: Vec<Call> = app.sip.calls.visible().filter(|c| c.id() != call.id() && c.is_live()).cloned().collect();
         if !others.is_empty() {
