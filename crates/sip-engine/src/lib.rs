@@ -281,6 +281,8 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut devices = AudioDevices::default();
     let mut buddies: Vec<String> = Vec::new();
     let mut online_status = OnlineStatus::Online;
+    // The Settings preview, kept across restarts.
+    let mut preview_on = false;
     let mut session = start(&config, &sink);
     let mut suspended = false;
     let mut debug_on = false;
@@ -383,6 +385,9 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 if let Some(s) = &mut session {
                     s.set_online_status(online_status);
+                    // A restart (say, for another camera) stops the preview:
+                    // bring it back, with the camera now chosen.
+                    s.set_preview(preview_on);
                 }
                 if debug_on && session.is_some() {
                     pj::debug::apply(true);
@@ -425,11 +430,20 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                     add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 if let Some(s) = &mut session {
                     s.set_online_status(online_status);
+                    // A restart (say, for another camera) stops the preview:
+                    // bring it back, with the camera now chosen.
+                    s.set_preview(preview_on);
                 }
                 }
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetPreview(on) => {
+                preview_on = on;
+                if let Some(s) = &mut session {
+                    s.set_preview(on);
+                }
+            }
             Command::SetOnlineStatus(status) => {
                 online_status = status;
                 if let Some(s) = &mut session {
@@ -517,7 +531,6 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::SendDtmf { call, digits, method } => call_error(Some(call), s.send_dtmf(call, &digits, method)),
         Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),
         Command::Transfer { call, target } => call_error(Some(call), s.transfer(call, &target)),
-        Command::SetPreview(on) => s.set_preview(on),
         Command::SetVideoSending { call, on } => call_error(Some(call), s.set_video_sending(call, on)),
         Command::AddVideo(call) => call_error(Some(call), s.add_video(call)),
         Command::SendMessage { id, target, text, local } => {
@@ -541,6 +554,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::SetCallOptions(_)
         | Command::SetRecording(_)
         | Command::SetOnlineStatus(_)
+        | Command::SetPreview(_)
         | Command::SetAudioDevices(_)
         | Command::SetBuddies(_)
         | Command::SetLevels(_)
