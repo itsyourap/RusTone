@@ -99,6 +99,8 @@ pub struct App {
     idle: IdleWatch,
     /// Starting with Windows.
     pub start_at_login: crate::autostart::StartAtLogin,
+    /// Media keys during calls, while that's on.
+    media_keys: Option<crate::media_keys::MediaKeys>,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -178,6 +180,7 @@ impl App {
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
+            media_keys: None,
             start_at_login: {
                 let wake = waker.clone();
                 let start = crate::autostart::StartAtLogin::new(move || wake.wake());
@@ -226,6 +229,67 @@ impl App {
     pub fn reopen_window(&mut self, ctx: &egui::Context) {
         self.next = Closed::Reopen;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Media keys and headset buttons:
+    /// shows the call in the desktop's media controls and acts on the keys.
+    /// Returns true when the window should come forward.
+    fn media_keys(&mut self) -> bool {
+        use crate::media_keys::{CallKey, MediaKeys, Shown};
+        if !self.settings.calls.media_keys {
+            if let Some(mut controls) = self.media_keys.take() {
+                controls.show(None);
+            }
+            return false;
+        }
+        let calls = &self.sip.calls;
+        let ringing = calls.visible().find(|c| c.is_ringing_in()).cloned();
+        let current = calls.current_call().filter(|c| c.is_live()).cloned();
+        let shown = ringing.as_ref().or(current.as_ref()).map(|c| Shown {
+            id: c.info.sip_call_id.clone(),
+            caller: crate::ui::call::caller(self, c),
+            status: c.status_text(),
+            playing: c.is_ringing_in() || c.info.media == sip_engine::MediaState::Active,
+        });
+        // Time changes the status every second; show the state, not the clock.
+        let shown = shown.map(|mut s| {
+            if s.playing && s.status.contains(':') {
+                s.status = "In a call".into();
+            }
+            s
+        });
+        // Not until there's a call; after that, stopped between calls.
+        if shown.is_none() && self.media_keys.is_none() {
+            return false;
+        }
+        let waker = self.waker.clone();
+        let controls = self.media_keys.get_or_insert_with(|| MediaKeys::start(move || waker.wake()));
+        controls.show(shown);
+        let pressed = controls.keys();
+        let mut raise = false;
+        for key in pressed {
+            match (key, &ringing, &current) {
+                (CallKey::AnswerOrHold, Some(r), _) => {
+                    let (id, video) = (r.id(), r.info.remote_video && self.settings.features.video);
+                    self.act(|c| c.answer(id, video));
+                }
+                (CallKey::AnswerOrHold, None, Some(c)) => {
+                    let id = c.id();
+                    self.act(|b| b.toggle_hold(id));
+                }
+                (CallKey::DeclineOrHangUp, Some(r), _) => {
+                    let id = r.id();
+                    self.act(|c| c.decline(id));
+                }
+                (CallKey::DeclineOrHangUp, None, Some(c)) => {
+                    let id = c.id();
+                    self.act(|b| b.hangup(id));
+                }
+                (CallKey::Raise, ..) => raise = true,
+                _ => {}
+            }
+        }
+        raise
     }
 
     /// Acts on a command-line verb. Returns true
@@ -672,6 +736,7 @@ impl App {
                 Event::Menu(_) => {}
             }
         }
+        show |= self.media_keys();
         let requests = std::mem::take(&mut *self.requests.lock().unwrap_or_else(|e| e.into_inner()));
         for request in requests {
             match request {

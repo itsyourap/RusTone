@@ -10,6 +10,7 @@ mod directory;
 mod hookrun;
 mod icons;
 mod idle;
+mod media_keys;
 mod netwatch;
 mod phonebook;
 mod sip;

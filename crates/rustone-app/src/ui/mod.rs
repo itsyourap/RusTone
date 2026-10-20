@@ -1,7 +1,7 @@
 //! The window's layout: header, page, bottom navigation.
 
 mod accounts;
-mod call;
+pub(crate) mod call;
 mod contacts;
 mod history;
 mod messages;

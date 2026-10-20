@@ -186,6 +186,9 @@ pub struct CallSettings {
     pub forwarding_delay: u32,
     /// Hang up answered calls after this many seconds; 0 never.
     pub auto_hangup: u32,
+    /// Media keys and headset buttons answer, hold and hang up during
+    /// calls.
+    pub media_keys: bool,
 }
 
 /// When auto-answer may answer while other calls exist.
@@ -340,6 +343,7 @@ impl Default for CallSettings {
             forwarding_number: String::new(),
             forwarding_delay: 0,
             auto_hangup: 0,
+            media_keys: false,
         }
     }
 }

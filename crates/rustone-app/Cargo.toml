@@ -32,6 +32,7 @@ fastframe-power.workspace = true
 fastframe-notifications.workspace = true
 fastframe-dock.workspace = true
 fastframe-autostart.workspace = true
+fastframe-now-playing.workspace = true
 if-addrs = "0.15"
 resvg = "0.45"
 egui_plot = "0.37"
