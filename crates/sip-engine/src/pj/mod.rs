@@ -5,6 +5,7 @@ mod audio;
 mod callbacks;
 mod calls;
 pub mod debug;
+mod presence;
 mod quality;
 mod util;
 
@@ -47,6 +48,11 @@ pub struct Session {
     devices: Vec<AudioDevice>,
     wanted_devices: AudioDevices,
     device_ids: DeviceIds,
+    /// Numbers whose presence is wanted, and the live subscriptions; they
+    /// start once the account is registered (or has no registrar).
+    wanted_buddies: Vec<String>,
+    buddies: presence::Buddies,
+    presence_ready: bool,
     stopped: bool,
 }
 
@@ -70,6 +76,9 @@ impl Session {
             devices: Vec::new(),
             wanted_devices: AudioDevices::default(),
             device_ids: DeviceIds::default(),
+            wanted_buddies: Vec::new(),
+            buddies: presence::Buddies::default(),
+            presence_ready: false,
             stopped: false,
         };
         match session.init(cfg) {
@@ -112,6 +121,7 @@ impl Session {
         ua.cb.on_call_transfer_request2 = Some(callbacks::on_call_transfer_request2);
         ua.cb.on_call_transfer_status = Some(callbacks::on_call_transfer_status);
         ua.cb.on_call_redirected = Some(callbacks::on_call_redirected);
+        ua.cb.on_buddy_state = Some(presence::on_buddy_state);
 
         pj_default!(log: pjsua_logging_config = pjsua_logging_config_default);
         log.cb = Some(callbacks::on_log);
@@ -226,6 +236,9 @@ impl Session {
 
     /// Replaces the main account.
     pub fn set_account(&mut self, account: Option<&AccountConfig>, sink: &Sink) {
+        // Subscriptions belong to the old account.
+        self.buddies.clear();
+        self.presence_ready = false;
         if self.account != PJSUA_INVALID_ID {
             callbacks::set_main_account(PJSUA_INVALID_ID);
             // SAFETY: a valid account id from this session; deleting unregisters it.
@@ -246,6 +259,7 @@ impl Session {
                 self.account = id;
                 if !registers {
                     sink(Event::Registration(RegState::NoRegistrar));
+                    self.start_presence();
                 }
             }
             Err(e) => {
@@ -403,6 +417,39 @@ impl Session {
         if let Err(e) = check(unsafe { pjsua_handle_ip_change(&param) }, "handling the network change") {
             log::warn!("{e}");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Presence
+
+    /// The numbers to watch (contacts with presence on).
+    pub fn set_buddies(&mut self, numbers: &[String]) {
+        self.wanted_buddies = numbers.to_vec();
+        if self.presence_ready {
+            self.sync_buddies();
+        }
+    }
+
+    /// The account is registered: subscribe (once until the account changes).
+    pub fn start_presence(&mut self) {
+        if !std::mem::replace(&mut self.presence_ready, true) {
+            self.sync_buddies();
+        }
+    }
+
+    fn sync_buddies(&mut self) {
+        let wanted: Vec<(String, String)> = self
+            .wanted_buddies
+            .iter()
+            .filter_map(|number| {
+                // Formatted without the dial plan.
+                // pjsua_buddy_add wants a bare URI, not `<name-addr>`.
+                let uri = self.target_uri(number, false).ok()?;
+                let uri = uri.trim().trim_start_matches('<').trim_end_matches('>').to_owned();
+                Some((number.clone(), uri))
+            })
+            .collect();
+        self.buddies.sync(&wanted, &mut self.arena);
     }
 
     // -----------------------------------------------------------------------
@@ -637,6 +684,7 @@ impl Session {
             return;
         }
         callbacks::set_main_account(PJSUA_INVALID_ID);
+        self.buddies.clear();
         self.stop_sound();
         calls::drop_all_tonegens();
         debug::remove_taps();

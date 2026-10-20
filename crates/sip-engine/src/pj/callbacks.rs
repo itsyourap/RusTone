@@ -57,13 +57,20 @@ pub fn set_main_account(acc_id: pjsua_acc_id) {
     MAIN_ACCOUNT.store(acc_id, Ordering::SeqCst);
 }
 
+/// Hands a message to the engine thread.
+fn send_engine(message: Message) {
+    if let Some(tx) = ENGINE_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.send(message);
+    }
+}
+
 pub fn emit(event: Event) {
     if let Some(sink) = SINK.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
         sink(event);
     }
 }
 
-fn guard(f: impl FnOnce()) {
+pub(super) fn guard(f: impl FnOnce()) {
     if catch_unwind(AssertUnwindSafe(f)).is_err() {
         log::error!("panic in a pjsua callback (contained)");
     }
@@ -121,7 +128,12 @@ pub unsafe extern "C" fn on_reg_state2(acc_id: pjsua_acc_id, info: *mut pjsua_re
             return;
         }
         let param = unsafe { &*info.cbparam };
-        emit(Event::Registration(reg_state(info, param)));
+        let state = reg_state(info, param);
+        if matches!(state, RegState::Registered { .. }) {
+            // Presence subscriptions start once registered.
+            send_engine(Message::Registered);
+        }
+        emit(Event::Registration(state));
     });
 }
 

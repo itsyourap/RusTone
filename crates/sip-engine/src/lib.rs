@@ -15,6 +15,7 @@ mod event;
 #[cfg(windows)]
 mod hotplug;
 mod pj;
+mod presence;
 mod quality;
 
 use std::sync::Arc;
@@ -28,6 +29,7 @@ pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, Me
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
 pub use pj::CallOptions;
+pub use presence::{Presence, PresenceState};
 pub use quality::CallQuality;
 
 /// Receives engine events. Called from pjsua's threads: keep it short.
@@ -78,6 +80,8 @@ pub enum Command {
     MonitorCalls(bool),
     /// Speaker and microphone levels; applies without a restart.
     SetLevels(Levels),
+    /// Watch these numbers' presence (contacts with presence on).
+    SetBuddies(Vec<String>),
     /// Use these sound devices (by name); applies without a restart.
     SetAudioDevices(AudioDevices),
     PlaySound(Sound),
@@ -93,6 +97,8 @@ pub(crate) enum Message {
     PlayerEnded(i32),
     /// Windows reported a sound device change (from a COM thread).
     DevicesChanged,
+    /// The main account registered (from pjsua's callback).
+    Registered,
     Shutdown,
 }
 
@@ -203,6 +209,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut account: Option<AccountConfig> = None;
     let mut local: Option<LocalAccountConfig> = None;
     let mut devices = AudioDevices::default();
+    let mut buddies: Vec<String> = Vec::new();
     let mut session = start(&config, &sink);
     let mut suspended = false;
     let mut debug_on = false;
@@ -256,6 +263,12 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
         };
         let command = match received {
             Ok(Message::Command(command)) => *command,
+            Ok(Message::Registered) => {
+                if let Some(s) = &mut session {
+                    s.start_presence();
+                }
+                continue;
+            }
             Ok(Message::DevicesChanged) => {
                 devices_due = Some(Instant::now() + DEVICE_SETTLE);
                 continue;
@@ -274,6 +287,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 stop(&mut session, &sink);
                 session = start(&config, &sink);
                 set_devices(&mut session, &devices);
+                set_buddies(&mut session, &buddies);
                 add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 if debug_on && session.is_some() {
                     pj::debug::apply(true);
@@ -312,6 +326,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 if suspended && session.is_none() {
                     session = start(&config, &sink);
                     set_devices(&mut session, &devices);
+                    set_buddies(&mut session, &buddies);
                     add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
                 }
                 suspended = false;
@@ -326,6 +341,12 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 }
             }
             Command::SetLevels(levels) => pj::set_levels(levels, session.is_some()),
+            Command::SetBuddies(new) => {
+                buddies = new;
+                if let Some(s) = &mut session {
+                    s.set_buddies(&buddies);
+                }
+            }
             Command::SetAudioDevices(new) => {
                 devices = new;
                 set_devices(&mut session, &devices);
@@ -390,6 +411,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::Resume
         | Command::SetCallOptions(_)
         | Command::SetAudioDevices(_)
+        | Command::SetBuddies(_)
         | Command::SetLevels(_)
         | Command::MonitorCalls(_)
         | Command::SetDebug(_) => {}
@@ -423,6 +445,12 @@ fn stop(session: &mut Option<pj::Session>, sink: &Sink) {
 fn set_devices(session: &mut Option<pj::Session>, devices: &AudioDevices) {
     if let Some(s) = session {
         s.set_audio_devices(devices);
+    }
+}
+
+fn set_buddies(session: &mut Option<pj::Session>, numbers: &[String]) {
+    if let Some(s) = session {
+        s.set_buddies(numbers);
     }
 }
 
