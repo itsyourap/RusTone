@@ -7,6 +7,7 @@ mod app;
 mod calls;
 mod icons;
 mod netwatch;
+mod phonebook;
 mod sip;
 mod theme;
 mod tray;
@@ -128,7 +129,7 @@ fn main() -> ExitCode {
 
     fastframe_titlebar::init();
     let start_hidden = args.minimized || settings.ui.start_minimized;
-    let paths = Paths { settings: settings_path, sounds: dirs.cache.join("sounds"), sip_log: dirs.state.join("sip.log"), renamed_from_rustone: !renamed.is_empty() };
+    let paths = Paths { settings: settings_path, sounds: dirs.cache.join("sounds"), sip_log: dirs.state.join("sip.log"), database: dirs.config.join(rustone_core::store::FILE_NAME), renamed_from_rustone: !renamed.is_empty() };
     let app = App::new(settings, paths, requests, &waker);
 
     let shell = Shell::new(app, &waker).start_hidden(start_hidden);

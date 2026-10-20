@@ -2,6 +2,7 @@
 
 mod accounts;
 mod call;
+mod contacts;
 pub mod debug;
 mod dialer;
 mod settings;
@@ -32,6 +33,8 @@ pub enum Page {
     Settings,
     /// The account editor (reached from Settings).
     Account,
+    /// The contact editor (reached from Contacts).
+    Contact,
 }
 
 /// Per-window UI state, reset when the window is rebuilt.
@@ -43,6 +46,8 @@ pub struct UiState {
     /// Showing the dialer during a call ("Add call").
     pub adding_call: bool,
     pub call_panel: call::CallPanel,
+    pub contacts: contacts::ContactsView,
+    pub contact_draft: Option<contacts::Draft>,
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App) {
@@ -80,16 +85,33 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                     }
                 }
                 Page::Calls => widgets::empty_state(ui, &p, Icon::History, "No calls yet", "Calls you make and receive appear here."),
-                Page::Contacts => widgets::empty_state(ui, &p, Icon::Users, "No contacts", "Contacts and their presence appear here."),
+                Page::Contacts => contacts::show(ui, app, &p),
                 Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
                 Page::Settings => settings::show(ui, app, &p),
                 Page::Account => accounts::editor(ui, app, &p),
+                Page::Contact => contacts::editor(ui, app, &p),
             }
+            notice(ui, app, &p);
         });
 
     if fastframe_titlebar::enabled() {
         fastframe_titlebar::resize(ui);
     }
+}
+
+/// The latest notice (failed call, import result...) as a toast at the
+/// bottom of the page; it fades after a few seconds.
+fn notice(ui: &mut Ui, app: &App, p: &Palette) {
+    let Some((text, _)) = &app.sip.calls.notice else { return };
+    let max = ui.max_rect();
+    let galley = widgets::elided(ui, text.clone(), Weight::Medium.font_id(13.0), p.window, max.width() - 48.0);
+    let size = galley.size() + vec2(28.0, 18.0);
+    let rect = egui::Rect::from_center_size(egui::pos2(max.center().x, max.bottom() - size.y / 2.0 - 8.0), size);
+    let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("notice")));
+    painter.rect_filled(rect, egui::CornerRadius::same(10), p.text);
+    painter.galley(rect.min + vec2(14.0, 9.0), galley, p.window);
+    // Keep drawing so the notice goes away on time.
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
 }
 
 /// Places a call from the dialer. Uses the local account for IP addresses

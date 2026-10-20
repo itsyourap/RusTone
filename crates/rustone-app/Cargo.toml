@@ -34,6 +34,7 @@ resvg = "0.45"
 egui_plot = "0.37"
 realfft = "3.5"
 jiff = "0.2"
+rfd = "0.17.2"
 
 [dev-dependencies]
 egui_kittest = "0.36.1"

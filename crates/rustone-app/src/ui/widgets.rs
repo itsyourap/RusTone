@@ -264,6 +264,26 @@ pub fn primary_button(ui: &mut Ui, p: &Palette, text: &str, fill: Color32) -> Re
     ui.add(button)
 }
 
+/// A round avatar in `rect`: the name's initials, or a phone for numbers
+/// and addresses.
+pub fn avatar_at(ui: &Ui, p: &Palette, rect: egui::Rect, title: &str) {
+    let size = rect.width().min(rect.height());
+    ui.painter().circle_filled(rect.center(), size / 2.0, p.accent.gamma_multiply(0.2));
+    match initials(title) {
+        Some(letters) => {
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, letters, Weight::SemiBold.font_id(size * 0.34), p.accent);
+        }
+        // Numbers and addresses get a phone instead of a meaningless digit.
+        None => Icon::Phone.image(p.accent, size * 0.4).paint_at(ui, egui::Rect::from_center_size(rect.center(), Vec2::splat(size * 0.4))),
+    }
+}
+
+/// Initials of a name's first two words; `None` for numbers and addresses.
+pub fn initials(title: &str) -> Option<String> {
+    let letters: String = title.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphabetic())).take(2).collect();
+    (!letters.is_empty()).then(|| letters.to_uppercase())
+}
+
 /// What happened to a [`level_slider`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LevelResponse {
@@ -343,6 +363,15 @@ pub fn level_slider(ui: &mut Ui, p: &Palette, icons: (Icon, Icon), label: &str, 
 mod tests {
     use super::*;
     use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn initials_from_names_and_numbers() {
+        assert_eq!(initials("Alice Brown").as_deref(), Some("AB"));
+        assert_eq!(initials("05550100002"), None);
+        assert_eq!(initials("192.168.29.54"), None);
+        assert_eq!(initials("(none)").as_deref(), Some("N"));
+        assert_eq!(initials(""), None);
+    }
 
     #[test]
     fn level_slider_follows_clicks_and_arrow_keys() {

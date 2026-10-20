@@ -26,6 +26,8 @@ pub struct Paths {
     pub sounds: PathBuf,
     /// The opt-in full SIP log.
     pub sip_log: PathBuf,
+    /// `rustone.db`: contacts and call history.
+    pub database: PathBuf,
     /// The data folders were just renamed from "RusTone": move the passwords too.
     pub renamed_from_rustone: bool,
 }
@@ -65,6 +67,7 @@ pub struct App {
     tray_status: Option<Status>,
     requests: Requests,
     pub sip: Sip,
+    pub phonebook: crate::phonebook::Phonebook,
     secrets: Box<dyn SecretStore>,
     power: fastframe_power::Power,
     net: NetWatch,
@@ -133,6 +136,7 @@ impl App {
             tray_status: None,
             requests,
             sip,
+            phonebook: crate::phonebook::Phonebook::open(&paths.database),
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
@@ -190,6 +194,11 @@ impl App {
 
     pub fn status(&self) -> Status {
         self.sip.status(&self.settings)
+    }
+
+    /// Shows `text` briefly at the bottom of the window.
+    pub fn notify(&mut self, text: impl Into<String>) {
+        self.sip.calls.notice = Some((text.into(), Instant::now()));
     }
 
     /// Runs a call action and sends the commands it produces.

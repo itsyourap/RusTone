@@ -135,20 +135,7 @@ fn quality_word(mos: f32, p: &Palette) -> (&'static str, egui::Color32) {
 
 fn avatar(ui: &mut Ui, p: &Palette, title: &str, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    ui.painter().circle_filled(rect.center(), size / 2.0, p.accent.gamma_multiply(0.2));
-    match initials(title) {
-        Some(letters) => {
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, letters, Weight::SemiBold.font_id(size * 0.34), p.accent);
-        }
-        // Numbers and addresses get a phone instead of a meaningless digit.
-        None => Icon::Phone.image(p.accent, size * 0.4).paint_at(ui, egui::Rect::from_center_size(rect.center(), Vec2::splat(size * 0.4))),
-    }
-}
-
-/// Initials of a name's first two words; `None` for numbers and addresses.
-fn initials(title: &str) -> Option<String> {
-    let letters: String = title.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphabetic())).take(2).collect();
-    (!letters.is_empty()).then(|| letters.to_uppercase())
+    widgets::avatar_at(ui, p, rect, title);
 }
 
 fn ringing_controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
@@ -320,18 +307,4 @@ fn transfer(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, mut target: St
         }
     });
     app.ui.call_panel = if close { CallPanel::None } else { CallPanel::Transfer { target } };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn initials_from_names_and_numbers() {
-        assert_eq!(initials("Alice Brown").as_deref(), Some("AB"));
-        assert_eq!(initials("05550100002"), None);
-        assert_eq!(initials("192.168.29.54"), None);
-        assert_eq!(initials("(none)").as_deref(), Some("N"));
-        assert_eq!(initials(""), None);
-    }
 }
