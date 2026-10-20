@@ -167,6 +167,12 @@ pub struct CallSettings {
     pub auto_answer_numbers: String,
     /// When other calls don't stop it.
     pub auto_answer_when: AutoAnswerWhen,
+    /// Forward incoming calls to [`Self::forwarding_number`] with a 302.
+    pub forwarding: bool,
+    /// Where calls are forwarded: a number or SIP address.
+    pub forwarding_number: String,
+    /// Seconds of ringing before forwarding; 0 forwards without ringing.
+    pub forwarding_delay: u32,
 }
 
 /// When auto-answer may answer while other calls exist.
@@ -252,6 +258,9 @@ impl Default for CallSettings {
             auto_answer_delay: 0,
             auto_answer_numbers: String::new(),
             auto_answer_when: AutoAnswerWhen::NoOtherCalls,
+            forwarding: false,
+            forwarding_number: String::new(),
+            forwarding_delay: 0,
         }
     }
 }

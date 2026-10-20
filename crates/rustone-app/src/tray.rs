@@ -10,6 +10,7 @@ pub const QUIT: &str = "quit";
 pub const DEBUG: &str = "debug";
 pub const DND: &str = "dnd";
 pub const AUTO_ANSWER: &str = "auto-answer";
+pub const FORWARD: &str = "forward";
 const STATUS: &str = "status";
 
 /// Creates the tray item. `None` if the platform has no tray.
@@ -27,6 +28,7 @@ pub fn spawn(wake: impl Fn() + Send + Sync + 'static) -> Option<Tray> {
                 MenuItem::Separator,
                 MenuItem::action(DND, toggle_label("Do not disturb", false)),
                 MenuItem::action(AUTO_ANSWER, toggle_label("Auto-answer", false)),
+                MenuItem::action(FORWARD, toggle_label("Forward calls", false)).enabled(false),
                 MenuItem::Separator,
                 MenuItem::action(SHOW, "Show RusTone"),
                 MenuItem::action(DEBUG, "Debug window"),
@@ -52,17 +54,23 @@ fn toggle_label(label: &str, on: bool) -> String {
 pub struct Toggles {
     pub dnd: bool,
     pub auto_answer: bool,
+    pub forwarding: bool,
+    /// Forwarding needs a number; without one the entry is greyed out.
+    pub can_forward: bool,
 }
 
 impl Toggles {
     pub fn of(calls: &rustone_core::settings::CallSettings) -> Self {
-        Self { dnd: calls.dnd, auto_answer: calls.auto_answer }
+        let can_forward = !calls.forwarding_number.trim().is_empty();
+        Self { dnd: calls.dnd, auto_answer: calls.auto_answer, forwarding: calls.forwarding && can_forward, can_forward }
     }
 }
 
 pub fn show_toggles(tray: &mut Tray, toggles: Toggles) {
     tray.set_label(DND, toggle_label("Do not disturb", toggles.dnd));
     tray.set_label(AUTO_ANSWER, toggle_label("Auto-answer", toggles.auto_answer));
+    tray.set_label(FORWARD, toggle_label("Forward calls", toggles.forwarding));
+    tray.set_enabled(FORWARD, toggles.can_forward);
 }
 
 /// Shows the registration status: menu line, tooltip, a dimmed icon while

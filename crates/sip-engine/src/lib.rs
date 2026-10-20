@@ -67,6 +67,9 @@ pub enum Command {
     /// Respond to an incoming call with a reason phrase and extra headers
     /// (486 "Do Not Disturb", 302 with Contact and Diversion).
     Respond { call: CallId, code: u16, reason: String, headers: Vec<(String, String)> },
+    /// Forward a ringing call to `target` (a number or SIP URI): 302 with
+    /// it as Contact and our address as Diversion.
+    Forward { call: CallId, target: String },
     /// End a call (CANCEL, BYE or 603 as fits its state).
     Hangup(CallId),
     /// End a call with a status code and extra headers (e.g.
@@ -119,7 +122,7 @@ impl Command {
     /// The call a command is about, if any.
     pub fn call(&self) -> Option<CallId> {
         match self {
-            Self::Answer { call, .. } | Self::Respond { call, .. } | Self::End { call, .. } => Some(*call),
+            Self::Answer { call, .. } | Self::Respond { call, .. } | Self::End { call, .. } | Self::Forward { call, .. } => Some(*call),
             Self::Hangup(call) | Self::Hold(call) | Self::Unhold(call) | Self::AddVideo(call) => Some(*call),
             Self::Later { command, .. } => command.call(),
             _ => None,
@@ -130,7 +133,7 @@ impl Command {
     fn settles_call(&self) -> bool {
         match self {
             Self::Answer { code, .. } | Self::Respond { code, .. } => *code >= 200,
-            Self::Hangup(_) | Self::End { .. } => true,
+            Self::Hangup(_) | Self::End { .. } | Self::Forward { .. } => true,
             _ => false,
         }
     }
@@ -470,6 +473,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         }
         Command::Answer { call, code, video } => call_error(Some(call), s.answer(call, code, video)),
         Command::Respond { call, code, reason, headers } => call_error(Some(call), s.respond(call, code, &reason, &headers)),
+        Command::Forward { call, target } => call_error(Some(call), s.forward(call, &target)),
         Command::Hangup(call) => s.hangup(call, 0),
         Command::End { call, code, headers } => s.end(call, code, &headers),
         Command::HangupAll => s.hangup_all(),

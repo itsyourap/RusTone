@@ -188,6 +188,11 @@ fn party_header(ui: &mut Ui, p: &Palette, call: &Call, title: &str, compact: boo
         ui.label(egui::RichText::new(format!("Answering automatically in {} s", left.as_secs() + 1)).size(12.5).color(p.accent));
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
     }
+    if let Some((target, at)) = call.forward.as_ref().filter(|_| call.is_ringing_in()) {
+        let left = at.saturating_duration_since(std::time::Instant::now());
+        ui.label(egui::RichText::new(format!("Forwarding to {target} in {} s", left.as_secs() + 1)).size(12.5).color(p.accent));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+    }
     if let Some(from) = &call.info.diversion {
         ui.label(egui::RichText::new(format!("Forwarded from {from}")).size(12.0).color(p.dim));
     }

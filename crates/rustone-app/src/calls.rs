@@ -46,11 +46,13 @@ pub struct Call {
     pub started: SystemTime,
     /// When the engine answers it by itself (auto-answer with a delay).
     pub auto_answer_at: Option<Instant>,
+    /// Where it is forwarded, and when (now for an immediate forward).
+    pub forward: Option<(String, Instant)>,
 }
 
 impl Call {
     fn new(info: CallInfo) -> Self {
-        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None, started: SystemTime::now(), auto_answer_at: None }
+        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None, started: SystemTime::now(), auto_answer_at: None, forward: None }
     }
 
     pub fn id(&self) -> CallId {
@@ -172,7 +174,7 @@ impl EndedCall {
     /// Whether it counts as a missed call for the badge: an incoming call
     /// that wasn't answered and that the user didn't decline.
     pub fn is_missed(&self) -> bool {
-        self.info.direction == Direction::Incoming && !self.answered && self.info.status_code != 486
+        self.info.direction == Direction::Incoming && !self.answered && !matches!(self.info.status_code, 302 | 486)
     }
 }
 
@@ -296,6 +298,22 @@ impl CallBook {
             return;
         }
         let others = self.live_count() > 0;
+        let forward = Some(cfg.forwarding_number.trim()).filter(|n| cfg.forwarding && !n.is_empty()).map(|n| (n.to_owned(), Duration::from_secs(u64::from(cfg.forwarding_delay))));
+        if let Some((target, delay)) = &forward
+            && delay.is_zero()
+        {
+            // Without ringing; it shows only in the history.
+            call.hidden = true;
+            call.forward = Some((target.clone(), Instant::now()));
+            self.handled_sip_ids.push(info.sip_call_id.clone());
+            self.calls.push(call);
+            out.commands.push(Command::Forward { call: info.id, target: target.clone() });
+            return;
+        }
+        if let Some((target, delay)) = forward {
+            call.forward = Some((target.clone(), Instant::now() + delay));
+            out.commands.push(Command::Later { delay, command: Box::new(Command::Forward { call: info.id, target }) });
+        }
         if let Some(delay) = self.auto_answer_delay(info, cfg) {
             if delay.is_zero() {
                 // At once, with a beep instead of the ringtone.
@@ -362,6 +380,14 @@ impl CallBook {
         }
         let Some(call) = self.get_mut(id) else { return };
         if call.hidden {
+            if info.state == CallState::Disconnected {
+                // Ended: `tick` drops it.
+                call.ended = Some(Instant::now());
+                // A call forwarded without ringing still goes to the history.
+                if let Some((target, _)) = call.forward.clone() {
+                    out.ended.push(EndedCall { info: info.clone(), started: call.started, answered: false, reason: format!("Forwarded to {target}") });
+                }
+            }
             return;
         }
         let was_answered = call.answered.is_some();
@@ -586,6 +612,7 @@ fn end_reason(info: &CallInfo, answered: bool) -> String {
     match code {
         _ if answered => "Call ended".into(),
         0 | 200 => "Call ended".into(),
+        302 if info.direction == Direction::Incoming => "Forwarded".into(),
         404 => "Number not found".into(),
         408 | 480 => "No answer".into(),
         486 | 603 if info.direction == Direction::Incoming => "Declined".into(),
@@ -728,6 +755,35 @@ mod tests {
         assert_eq!(answers(&out), [180]);
         let out = ring(&mut b, &cfg, info(2, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>"));
         assert_eq!(answers(&out), [180], "busy with another call");
+    }
+
+    #[test]
+    fn forwarding_at_once_or_after_ringing() {
+        // At once: no ringing, no screen, but a history entry.
+        let mut b = book();
+        let cfg = CallSettings { forwarding: true, forwarding_number: "200".into(), ..CallSettings::default() };
+        let out = b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        assert_eq!(out.commands, [Command::Forward { call: 1, target: "200".into() }]);
+        assert!(!b.has_calls() && !out.show_window);
+        let mut ended = info(1, Direction::Incoming, CallState::Disconnected, "<sip:100@pbx>");
+        ended.status_code = 302;
+        let out = b.on_event(&Event::Call(ended), &cfg);
+        assert_eq!(out.ended.len(), 1);
+        assert_eq!((out.ended[0].reason.as_str(), out.ended[0].is_missed()), ("Forwarded to 200", false));
+
+        // After ringing: scheduled, and the screen counts down.
+        let mut b = book();
+        let cfg = CallSettings { forwarding_delay: 10, ..cfg };
+        let out = b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        assert!(out.commands.contains(&Command::Later { delay: Duration::from_secs(10), command: Box::new(Command::Forward { call: 1, target: "200".into() }) }));
+        assert_eq!(answers(&out), [180]);
+        assert!(b.get(1).is_some_and(|c| c.forward.is_some()));
+
+        // On without a number: nothing.
+        let mut b = book();
+        let cfg = CallSettings { forwarding: true, ..CallSettings::default() };
+        let out = b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        assert_eq!(answers(&out), [180]);
     }
 
     #[test]

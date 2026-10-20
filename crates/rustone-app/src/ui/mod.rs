@@ -218,6 +218,9 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     if calls.auto_answer && status.is_online() {
         label.push_str(" · AA");
     }
+    if forwarding(calls) && status.is_online() {
+        label.push_str(" · FWD");
+    }
     let label = label.as_str();
     let galley = ui.painter().layout_no_wrap(label.to_owned(), Weight::Medium.font_id(11.5), text);
     // Leave room for the settings button; show only the dot when narrow.
@@ -247,6 +250,10 @@ Do not disturb is on");
         hover.push_str("
 Auto-answer is on");
     }
+    if forwarding(calls) {
+        hover.push_str(&format!("
+Forwarding calls to {}", calls.forwarding_number.trim()));
+    }
     let response = response.on_hover_text(hover);
     // Its own id: the right-click menu uses the response's.
     egui::Popup::menu(&response).id(response.id.with("call-toggles")).show(|ui| {
@@ -269,16 +276,26 @@ Auto-answer is on");
     ChipOutcome { copied }
 }
 
+/// Whether calls are being forwarded (on, with somewhere to send them).
+fn forwarding(calls: &CallSettings) -> bool {
+    calls.forwarding && !calls.forwarding_number.trim().is_empty()
+}
+
 /// The quick call toggles under the status pill.
 fn call_toggles(ui: &mut Ui, p: &Palette, calls: &mut CallSettings) {
     ui.set_min_width(220.0);
-    for (value, label) in [(&mut calls.dnd, "Do not disturb"), (&mut calls.auto_answer, "Auto-answer")] {
+    let has_number = !calls.forwarding_number.trim().is_empty();
+    let forward_label = if has_number { format!("Forward to {}", calls.forwarding_number.trim()) } else { "Forward calls".to_owned() };
+    for (value, label, enabled) in [(&mut calls.dnd, "Do not disturb", true), (&mut calls.auto_answer, "Auto-answer", true), (&mut calls.forwarding, forward_label.as_str(), has_number)] {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(label).color(p.text));
+            ui.label(egui::RichText::new(label).color(if enabled { p.text } else { p.dim }));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                widgets::toggle(ui, p, value, label);
+                ui.add_enabled_ui(enabled, |ui| widgets::toggle(ui, p, value, label));
             });
         });
+    }
+    if !has_number {
+        ui.label(egui::RichText::new("Set a number in Settings › Forwarding").size(11.5).color(p.dim));
     }
 }
 

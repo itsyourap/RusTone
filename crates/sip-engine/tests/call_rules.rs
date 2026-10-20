@@ -55,17 +55,12 @@ fn responses_headers_and_delayed_commands() {
     peer.invite(ENGINE, "rules-2", "101", "");
     let call = incoming("rules-2");
     let started = Instant::now();
-    let forward = Command::Respond {
-        call: call.id,
-        code: 302,
-        reason: String::new(),
-        headers: vec![("Contact".into(), "<sip:200@127.0.0.1>".into()), ("Diversion".into(), "<sip:rustone-test@127.0.0.1>;reason=unconditional".into())],
-    };
-    engine.send(Command::Later { delay: Duration::from_secs(1), command: Box::new(forward.clone()) });
+    let forward = Command::Forward { call: call.id, target: "200@127.0.0.1".into() };
+    engine.send(Command::Later { delay: Duration::from_secs(1), command: Box::new(forward) });
     let moved = peer.recv("the 302", |m| m.code() == 302);
     assert!(started.elapsed() >= Duration::from_millis(900), "sent after the delay ({:?})", started.elapsed());
     assert!(moved.header("Contact").contains("sip:200@127.0.0.1"), "Contact: {}", moved.header("Contact"));
-    assert!(moved.header("Diversion").contains("reason=unconditional"), "Diversion: {}", moved.header("Diversion"));
+    assert!(moved.header("Diversion").contains("sip:rustone-test@"), "Diversion (the called address): {}", moved.header("Diversion"));
     peer.ack(ENGINE, &moved);
 
     // 3. Answering cancels the delayed forward; ending sends a Warning.

@@ -693,6 +693,16 @@ impl Session {
         check(unsafe { pjsua_call_answer2(call, std::ptr::null(), c_uint::from(code), reason_ptr, msg.as_ptr()) }, "responding to the call")
     }
 
+    /// Forwards a ringing call: 302 with `target` as Contact (formatted for
+    /// the account the call came in on) and the called address as
+    /// Diversion.
+    pub fn forward(&mut self, call: CallId, target: &str) -> Result<(), String> {
+        let (called, acc) = calls::with_call_info(call, |ci| (pj_to_string(&ci.local_info), ci.acc_id)).ok_or("the call has ended")?;
+        let uri = self.target_uri(target, acc != PJSUA_INVALID_ID && acc == self.local_account)?;
+        let contact = if uri.starts_with('<') { uri } else { format!("<{uri}>") };
+        self.respond(call, 302, "", &[("Contact".into(), contact), ("Diversion".into(), called)])
+    }
+
     /// Ends a call with `code` and extra headers.
     pub fn end(&self, call: CallId, code: u16, headers: &[(String, String)]) {
         let msg = util::MsgData::new(headers);

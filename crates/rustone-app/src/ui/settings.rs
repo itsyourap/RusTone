@@ -127,6 +127,23 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Forwarding");
+        card(ui, p, |ui| {
+            let calls = &mut app.settings.calls;
+            let mut changed = false;
+            setting_row(ui, p, "Forward calls", Some("Sends callers on with a 302. Also under the status pill and in the tray"), |ui| {
+                changed |= widgets::toggle(ui, p, &mut calls.forwarding, "Forward calls").changed();
+            });
+            ui.separator();
+            changed |= widgets::text_field(ui, p, "Forward to", "Number or SIP address", &mut calls.forwarding_number).changed();
+            ui.add_space(4.0);
+            changed |= widgets::number_field(ui, p, "Ring first for", &mut calls.forwarding_delay, 0..=600, " s").changed();
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Features");
         card(ui, p, |ui| {
             ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));

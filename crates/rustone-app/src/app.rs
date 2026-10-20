@@ -542,6 +542,10 @@ impl App {
                     self.settings.calls.dnd = !self.settings.calls.dnd;
                     self.mark_settings_dirty();
                 }
+                Event::Menu(tray::FORWARD) => {
+                    self.settings.calls.forwarding = !self.settings.calls.forwarding;
+                    self.mark_settings_dirty();
+                }
                 Event::Menu(tray::AUTO_ANSWER) => {
                     self.settings.calls.auto_answer = !self.settings.calls.auto_answer;
                     self.mark_settings_dirty();

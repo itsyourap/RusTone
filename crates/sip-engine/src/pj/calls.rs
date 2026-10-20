@@ -163,7 +163,7 @@ fn video_stream(ci: &pjsua_call_info) -> Option<VideoStream> {
     })
 }
 
-fn call_info_raw<T>(call_id: CallId, f: impl FnOnce(&pjsua_call_info) -> T) -> Option<T> {
+pub fn with_call_info<T>(call_id: CallId, f: impl FnOnce(&pjsua_call_info) -> T) -> Option<T> {
     let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
     // SAFETY: filled on success and read in place.
     unsafe {
@@ -176,7 +176,7 @@ fn call_info_raw<T>(call_id: CallId, f: impl FnOnce(&pjsua_call_info) -> T) -> O
 
 /// Whether the call uses video in any direction.
 pub fn has_video(call_id: CallId) -> bool {
-    call_info_raw(call_id, |ci| video_stream(ci).is_some()).unwrap_or(false)
+    with_call_info(call_id, |ci| video_stream(ci).is_some()).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ pub fn unused_video_index(call_id: CallId) -> Option<u32> {
 
 /// The call's video decoder slot, for drawing its video.
 pub fn video_decoder_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
-    call_info_raw(call_id, |ci| video_stream(ci).and_then(|v| v.decoder)).flatten()
+    with_call_info(call_id, |ci| video_stream(ci).and_then(|v| v.decoder)).flatten()
 }
 
 fn media_state(status: pjsua_call_media_status) -> MediaState {

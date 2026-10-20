@@ -161,13 +161,19 @@ pub(super) fn when(time: i64, now: &jiff::Zoned) -> String {
 
 fn call_row(ui: &mut Ui, p: &Palette, r: &CallRecord, contact: Option<&Contact>, expanded: bool, now: &jiff::Zoned) -> Option<RowAction> {
     let title = title(r, contact);
+    // Forwarded calls are unanswered but not missed.
+    let forwarded = r.kind == CallKind::Missed && r.info.starts_with("Forwarded");
     let (icon, tint, kind) = match r.kind {
+        _ if forwarded => (Icon::Transfer, p.secondary, "Forwarded"),
         CallKind::Outgoing => (Icon::Outgoing, p.secondary, "Outgoing"),
         CallKind::Incoming => (Icon::Incoming, p.success, "Incoming"),
         CallKind::Missed => (Icon::PhoneMissed, p.danger, "Missed"),
         CallKind::Elsewhere => (Icon::PhoneMissed, p.warning, "Answered elsewhere"),
     };
     let mut detail = vec![when(r.time, now)];
+    if forwarded {
+        detail.push(r.info.clone());
+    }
     if title != r.number {
         detail.insert(0, r.number.clone());
     }
@@ -187,7 +193,7 @@ fn call_row(ui: &mut Ui, p: &Palette, r: &CallRecord, contact: Option<&Contact>,
     icon.image(tint, 20.0).paint_at(ui, icon_rect);
     let text_x = rect.left() + 44.0;
     let width = rect.right() - 8.0 - text_x;
-    let name_color = if r.kind == CallKind::Missed { p.danger } else { p.text };
+    let name_color = if r.kind == CallKind::Missed && !forwarded { p.danger } else { p.text };
     let name = widgets::elided(ui, title, Weight::Medium.font_id(14.0), name_color, width);
     ui.painter().galley(egui::pos2(text_x, rect.top() + 9.0), name, name_color);
     let sub = widgets::elided(ui, detail, Weight::Regular.font_id(12.0), p.secondary, width);
