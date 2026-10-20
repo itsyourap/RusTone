@@ -349,11 +349,20 @@ pub fn conversation_key(number: &str) -> String {
         Some((user, host)) => (user, Some(host)),
         None => (n, None),
     };
-    let user: String = user.chars().filter(|c| !" -()./".contains(*c)).collect();
+    // Only phone numbers lose their formatting; names, hosts and IP
+    // addresses keep their dots and dashes.
+    let phone_like = user.chars().any(|c| c.is_ascii_digit()) && user.chars().all(|c| c.is_ascii_digit() || " -()./+".contains(c));
+    let user: String = if phone_like && !is_ip(user) { user.chars().filter(|c| !" -()./".contains(*c)).collect() } else { user.to_owned() };
     match host {
         Some(host) => format!("{user}@{}", host.to_ascii_lowercase()),
         None => user,
     }
+}
+
+/// An IPv4 address, possibly with a port (dots there aren't formatting).
+fn is_ip(s: &str) -> bool {
+    let host = s.rsplit_once(':').map_or(s, |(h, _)| h);
+    host.parse::<std::net::Ipv4Addr>().is_ok()
 }
 
 fn plural(n: usize) -> &'static str {
@@ -385,6 +394,9 @@ mod tests {
         assert_eq!(conversation_key("98765 43210"), "9876543210");
         assert_eq!(conversation_key("<sip:+91 (98) 765-43210@Example.COM>"), "+919876543210@example.com");
         assert_eq!(conversation_key("1001"), "1001");
+        assert_eq!(conversation_key("192.168.29.54"), "192.168.29.54", "IP addresses keep their dots");
+        assert_eq!(conversation_key("front-desk"), "front-desk", "names keep their dashes");
+        assert_eq!(conversation_key("+1 (555) 010-0100"), "+15550100100");
     }
 
     #[test]
