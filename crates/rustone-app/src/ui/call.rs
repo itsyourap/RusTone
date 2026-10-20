@@ -33,7 +33,7 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
 
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| ui.with_layout(Layout::top_down(Align::Center), |ui| {
         ui.add_space(if compact { 4.0 } else { 12.0 });
-        party_header(ui, p, &call, compact);
+        party_header(ui, p, &call, &caller(app, &call), compact);
         ui.add_space(if compact { 8.0 } else { 16.0 });
 
         if call.ended.is_some() {
@@ -63,7 +63,7 @@ pub fn return_bar(ui: &mut Ui, app: &mut App, p: &Palette) -> bool {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Return to the call"));
     let fill = if call.is_ringing_in() { p.warning } else { p.success };
     ui.painter().rect_filled(rect, egui::CornerRadius::same(10), fill.gamma_multiply(0.18));
-    let text = format!("{}  ·  {}", call.party().title(), call.status_text());
+    let text = format!("{}  ·  {}", caller(app, &call), call.status_text());
     ui.painter().text(rect.left_center() + vec2(12.0, 0.0), egui::Align2::LEFT_CENTER, text, Weight::Medium.font_id(13.0), p.text);
     ui.painter().text(rect.right_center() - vec2(12.0, 0.0), egui::Align2::RIGHT_CENTER, "Return to call", Weight::SemiBold.font_id(12.0), p.accent);
     response.clicked()
@@ -76,7 +76,7 @@ fn others_strip(ui: &mut Ui, app: &mut App, current: CallId) {
     }
     ui.horizontal_wrapped(|ui| {
         for other in others {
-            let text = format!("{} · {}", other.party().title(), other.status_text());
+            let text = format!("{} · {}", caller(app, &other), other.status_text());
             let button = egui::Button::new(egui::RichText::new(text).size(12.5)).corner_radius(egui::CornerRadius::same(14));
             if ui.add(button).on_hover_text("Switch to this call").clicked() {
                 app.act(|c| c.switch_to(other.id()));
@@ -86,15 +86,25 @@ fn others_strip(ui: &mut Ui, app: &mut App, current: CallId) {
     });
 }
 
-fn party_header(ui: &mut Ui, p: &Palette, call: &Call, compact: bool) {
+/// The name to show for a call: the contact's
+/// name, else the SIP display name, else the number.
+pub fn caller(app: &App, call: &Call) -> String {
+    let party = call.party();
+    match app.phonebook.lookup(&party.user) {
+        Some(contact) => contact.title(),
+        None => party.title().to_owned(),
+    }
+}
+
+fn party_header(ui: &mut Ui, p: &Palette, call: &Call, title: &str, compact: bool) {
     let party = call.party();
     // With a panel open, its space goes to the panel instead of the avatar.
     if !compact {
-        avatar(ui, p, party.title(), 88.0);
+        avatar(ui, p, title, 88.0);
         ui.add_space(10.0);
     }
-    ui.add(egui::Label::new(egui::RichText::new(party.title()).font(Weight::SemiBold.font_id(22.0)).color(p.text)).truncate());
-    if party.name.is_some() {
+    ui.add(egui::Label::new(egui::RichText::new(title).font(Weight::SemiBold.font_id(22.0)).color(p.text)).truncate());
+    if title != party.user {
         ui.label(egui::RichText::new(&party.user).size(14.0).color(p.secondary));
     }
     let status_color = if call.ended.is_some() { p.danger } else { p.secondary };
@@ -294,7 +304,7 @@ fn transfer(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, mut target: St
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Or connect with another call").size(12.0).color(p.secondary));
             for other in others {
-                let label = format!("Connect with {}", other.party().title());
+                let label = format!("Connect with {}", caller(app, &other));
                 if ui.add(egui::Button::new(label).min_size(vec2(ui.available_width(), 32.0))).clicked() {
                     app.act(|c| c.attended_transfer(call.id(), other.id()));
                     close = true;

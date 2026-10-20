@@ -3,6 +3,7 @@
 mod accounts;
 mod call;
 mod contacts;
+mod history;
 pub mod debug;
 mod dialer;
 mod settings;
@@ -47,6 +48,7 @@ pub struct UiState {
     pub adding_call: bool,
     pub call_panel: call::CallPanel,
     pub contacts: contacts::ContactsView,
+    pub history: history::HistoryView,
     pub contact_draft: Option<contacts::Draft>,
 }
 
@@ -84,7 +86,7 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                         None => {}
                     }
                 }
-                Page::Calls => widgets::empty_state(ui, &p, Icon::History, "No calls yet", "Calls you make and receive appear here."),
+                Page::Calls => history::show(ui, app, &p),
                 Page::Contacts => contacts::show(ui, app, &p),
                 Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
                 Page::Settings => settings::show(ui, app, &p),

@@ -264,6 +264,16 @@ impl App {
         }
         self.sip.sync(&self.settings);
         let polled = self.sip.poll(&self.settings);
+        if !polled.ended.is_empty() {
+            let own_hosts: Vec<String> = self
+                .settings
+                .active()
+                .map(|a| [a.server.trim().to_owned(), a.domain.trim().to_owned()].into_iter().chain(a.proxies()).filter(|h| !h.is_empty()).collect())
+                .unwrap_or_default();
+            for call in &polled.ended {
+                self.phonebook.record(call, &own_hosts);
+            }
+        }
         if polled.show_window {
             self.ui.page = crate::ui::Page::Dialer;
             self.ui.adding_call = false;

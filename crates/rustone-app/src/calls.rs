@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use rustone_core::settings::{CallSettings, DtmfMethod};
 use sip_engine::{CallId, CallInfo, CallState, Command, Direction, Event, MediaState, Sound, uri_user_host};
@@ -40,11 +40,13 @@ pub struct Call {
     hold_requested: bool,
     /// Latest quality sample while media flows.
     pub quality: Option<sip_engine::CallQuality>,
+    /// Wall-clock start, for the history.
+    pub started: SystemTime,
 }
 
 impl Call {
     fn new(info: CallInfo) -> Self {
-        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None }
+        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None, started: SystemTime::now() }
     }
 
     pub fn id(&self) -> CallId {
@@ -139,6 +141,29 @@ pub struct Outcome {
     pub commands: Vec<Command>,
     /// An incoming call wants the window brought forward.
     pub show_window: bool,
+    /// Calls that just ended, for the history (rejected duplicates excluded).
+    pub ended: Vec<EndedCall>,
+}
+
+/// A finished call, as the history needs it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EndedCall {
+    pub info: CallInfo,
+    pub started: SystemTime,
+    pub answered: bool,
+    /// How it ended.
+    pub reason: String,
+}
+
+impl EndedCall {
+    pub fn kind(&self) -> rustone_core::history::CallKind {
+        use rustone_core::history::CallKind;
+        match (self.info.direction, self.answered) {
+            (Direction::Outgoing, _) => CallKind::Outgoing,
+            (Direction::Incoming, true) => CallKind::Incoming,
+            (Direction::Incoming, false) => CallKind::Missed,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -214,6 +239,9 @@ impl CallBook {
                     if c.ended.is_none() {
                         c.ended = Some(Instant::now());
                         c.end_reason = Some("Call ended".into());
+                        if !c.hidden {
+                            out.ended.push(EndedCall { info: c.info.clone(), started: c.started, answered: c.answered.is_some(), reason: "Call ended".into() });
+                        }
                     }
                 }
                 self.ringback.clear();
@@ -318,7 +346,8 @@ impl CallBook {
             let reason = end_reason(info, was_answered);
             if let Some(call) = self.get_mut(id) {
                 call.ended = Some(Instant::now());
-                call.end_reason = Some(reason);
+                call.end_reason = Some(reason.clone());
+                out.ended.push(EndedCall { info: info.clone(), started: call.started, answered: was_answered, reason });
             }
             if was_answered && cfg.local_dtmf {
                 out.commands.push(self.play(Playing::OneShot, &self.sounds.hangup.clone(), false, IN_CALL_LEVEL));
@@ -560,6 +589,31 @@ mod tests {
         assert_eq!(played(&out), ["ring.wav"]);
         assert!(out.show_window);
         assert_eq!(b.current, Some(1));
+    }
+
+    #[test]
+    fn ended_calls_go_to_the_history() {
+        use rustone_core::history::CallKind;
+        let cfg = CallSettings::default();
+        let mut b = book();
+        let ended = |b: &mut CallBook, id, code| {
+            let mut i = info(id, Direction::Incoming, CallState::Disconnected, "<sip:100@pbx>");
+            i.status_code = code;
+            b.on_event(&Event::Call(i), &cfg).ended
+        };
+        b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
+        let missed = ended(&mut b, 1, 487);
+        assert_eq!((missed.len(), missed[0].kind()), (1, CallKind::Missed));
+        assert_eq!(missed[0].reason, "Missed call");
+
+        b.on_event(&Event::IncomingCall(info(2, Direction::Incoming, CallState::Incoming, "<sip:200@pbx>")), &cfg);
+        let declined = ended(&mut b, 2, 486);
+        assert_eq!((declined[0].kind(), declined[0].reason.as_str()), (CallKind::Missed, "Declined"));
+
+        // A refused duplicate leaves no trace.
+        b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &cfg);
+        b.on_event(&Event::IncomingCall(info(4, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &cfg);
+        assert!(ended(&mut b, 4, 486).is_empty());
     }
 
     #[test]

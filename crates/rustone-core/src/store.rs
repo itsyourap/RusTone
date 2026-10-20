@@ -7,6 +7,7 @@ use std::path::Path;
 use rusqlite::{Connection, Row, params};
 
 use crate::contacts::Contact;
+use crate::history::{CallKind, CallRecord};
 
 pub const FILE_NAME: &str = "rustone.db";
 
@@ -34,7 +35,21 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE contacts (
         starred INTEGER NOT NULL DEFAULT 0,
         presence INTEGER NOT NULL DEFAULT 0,
         directory INTEGER NOT NULL DEFAULT 0
-    );"];
+    );",
+    "CREATE TABLE history (
+        id INTEGER PRIMARY KEY,
+        kind INTEGER NOT NULL,
+        number TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL DEFAULT '',
+        time INTEGER NOT NULL,
+        duration INTEGER NOT NULL DEFAULT 0,
+        info TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX history_time ON history (time);",
+];
+
+/// Only the last 1000 calls are kept.
+pub const HISTORY_LIMIT: i64 = 1000;
 
 const INSERT_CONTACT: &str = "INSERT INTO contacts (name, number, first_name, last_name, phone, mobile, email, address, city, state, zip, comment, starred, presence, directory)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
@@ -134,6 +149,52 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Adds a call, dropping the oldest beyond [`HISTORY_LIMIT`]; returns its id.
+    pub fn add_call(&self, r: &CallRecord) -> Result<i64> {
+        self.conn
+            .execute(
+                "INSERT INTO history (kind, number, name, time, duration, info) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![r.kind.code(), r.number, r.name, r.time, r.duration, r.info],
+            )
+            .map_err(err)?;
+        let id = self.conn.last_insert_rowid();
+        self.conn
+            .execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY time DESC, id DESC LIMIT ?1)", [HISTORY_LIMIT])
+            .map_err(err)?;
+        Ok(id)
+    }
+
+    /// The history, newest first.
+    pub fn calls(&self) -> Result<Vec<CallRecord>> {
+        let mut stmt = self.conn.prepare("SELECT id, kind, number, name, time, duration, info FROM history ORDER BY time DESC, id DESC").map_err(err)?;
+        stmt.query_map([], |r| {
+            Ok(CallRecord {
+                id: r.get(0)?,
+                kind: CallKind::from_code(r.get(1)?),
+                number: r.get(2)?,
+                name: r.get(3)?,
+                time: r.get(4)?,
+                duration: r.get(5)?,
+                info: r.get(6)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(err)
+    }
+
+    pub fn delete_call(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM history WHERE id = ?1", [id]).map_err(err)?;
+        Ok(())
+    }
+
+    pub fn clear_calls(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM history", []).map_err(err)?;
+        Ok(())
+    }
+}
+
 fn contact_from_row(r: &Row<'_>) -> rusqlite::Result<Contact> {
     Ok(Contact {
         id: r.get(0)?,
@@ -175,6 +236,23 @@ mod tests {
         assert_eq!(store.contacts().unwrap()[0].mobile, "+91 98765");
         store.delete_contact(ada.id).unwrap();
         assert_eq!(store.contacts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn history_keeps_the_newest_calls() {
+        let store = Store::open_in_memory().unwrap();
+        let call = |time| CallRecord { id: 0, kind: CallKind::Missed, number: "1002".into(), name: String::new(), time, duration: 0, info: "Missed call".into() };
+        for t in 0..HISTORY_LIMIT + 5 {
+            store.add_call(&call(t)).unwrap();
+        }
+        let calls = store.calls().unwrap();
+        assert_eq!(calls.len() as i64, HISTORY_LIMIT);
+        assert_eq!((calls[0].time, calls.last().unwrap().time), (HISTORY_LIMIT + 4, 5), "newest first, oldest dropped");
+        assert_eq!(calls[0].kind, CallKind::Missed);
+        store.delete_call(calls[0].id).unwrap();
+        assert_eq!(store.calls().unwrap().len() as i64, HISTORY_LIMIT - 1);
+        store.clear_calls().unwrap();
+        assert!(store.calls().unwrap().is_empty());
     }
 
     #[test]

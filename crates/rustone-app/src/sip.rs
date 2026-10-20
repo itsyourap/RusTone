@@ -85,6 +85,8 @@ pub struct Sip {
 pub struct Polled {
     /// An incoming call wants the window shown.
     pub show_window: bool,
+    /// Calls that ended, for the history.
+    pub ended: Vec<crate::calls::EndedCall>,
 }
 
 impl Sip {
@@ -197,6 +199,7 @@ impl Sip {
         for event in events {
             let outcome = self.calls.on_event(&event, &settings.calls);
             polled.show_window |= outcome.show_window;
+            polled.ended.extend(outcome.ended);
             self.run(outcome.commands);
             match event {
                 Event::Started => self.engine_state = EngineState::Running,
