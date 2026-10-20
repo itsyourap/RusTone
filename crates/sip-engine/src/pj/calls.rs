@@ -143,6 +143,7 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
         sending_video: video_stream(ci).is_some_and(|v| v.dir & PJMEDIA_DIR_ENCODING != 0),
         camera_off: lock(&CAMERA_OFF).contains(&ci.id),
         in_conference: lock(&CONFERENCE).contains(&ci.id),
+        recording: super::record::is_recording(ci.id),
         sip_call_id: pj_to_string(&ci.call_id),
         caller_id: headers.caller_id,
         user_agent: headers.user_agent,
@@ -294,7 +295,7 @@ static MIC_MUTED: AtomicBool = AtomicBool::new(false);
 static SPEAKER_MUTED: AtomicBool = AtomicBool::new(false);
 static LEVELS: Mutex<Levels> = Mutex::new(Levels { speaker: 100, mic: 100, mic_amplification: false, software_mic: false });
 
-fn call_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
+pub(super) fn call_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
     // SAFETY: plain query.
     let slot = unsafe { pjsua_call_get_conf_port(call_id) };
     (slot != PJSUA_INVALID_ID).then_some(slot)
@@ -328,7 +329,11 @@ pub fn update_media(call_id: CallId) {
         }
     }
     // A conference member hears the others.
-    if lock(&CONFERENCE).contains(&call_id) {
+    let member = lock(&CONFERENCE).contains(&call_id);
+    if member && flowing {
+        super::record::follow_conference(call_id);
+    }
+    if member {
         for other in conference_peers(call_id) {
             // SAFETY: valid slots of this pjsua instance.
             unsafe {
@@ -397,6 +402,15 @@ pub fn report_calls() {
             super::callbacks::emit(crate::Event::Call(info));
         }
     }
+}
+
+/// The other members of `call`'s conference (empty when it isn't in one).
+pub fn conference_members(call: CallId) -> Vec<CallId> {
+    let members = lock(&CONFERENCE);
+    if !members.contains(&call) {
+        return Vec::new();
+    }
+    members.iter().copied().filter(|&c| c != call).collect()
 }
 
 pub fn in_conference(call: CallId) -> bool {

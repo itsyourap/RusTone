@@ -80,6 +80,8 @@ pub struct CallInfo {
     pub sending_video: bool,
     /// Mixed with other calls in a conference.
     pub in_conference: bool,
+    /// Being recorded to a WAV file.
+    pub recording: bool,
     /// We stopped sending our camera (or the peer added video and it
     /// hasn't been turned on yet).
     pub camera_off: bool,

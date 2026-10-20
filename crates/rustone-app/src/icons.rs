@@ -42,6 +42,7 @@ fastframe_icons::icons! {
         Star => "star",
         Send => "send-horizontal",
         VideoOff => "video-off",
+        Record => "circle-dot",
         Maximize => lucide "maximize-2",
         Minimize => lucide "minimize-2",
         More => lucide "ellipsis",

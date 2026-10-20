@@ -213,7 +213,17 @@ fn party_header(ui: &mut Ui, p: &Palette, call: &Call, title: &str, compact: boo
         ui.label(egui::RichText::new(&party.user).size(14.0).color(p.secondary));
     }
     let status_color = if call.ended.is_some() { p.danger } else { p.secondary };
-    ui.label(egui::RichText::new(call.status_text()).font(Weight::Medium.font_id(15.0)).color(status_color));
+    ui.horizontal(|ui| {
+        // Centred: the status with a red REC while recording.
+        let text = call.status_text();
+        let rec = call.info.recording && call.ended.is_none();
+        let width = ui.painter().layout_no_wrap(text.clone(), Weight::Medium.font_id(15.0), status_color).size().x + if rec { 52.0 } else { 0.0 };
+        ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+        ui.label(egui::RichText::new(text).font(Weight::Medium.font_id(15.0)).color(status_color));
+        if rec {
+            ui.label(egui::RichText::new("● REC").font(Weight::SemiBold.font_id(12.0)).color(p.danger)).on_hover_text("Recording");
+        }
+    });
     if let Some(q) = call.quality.as_ref().filter(|_| call.ended.is_none() && call.info.media == MediaState::Active) {
         quality_line(ui, p, q);
     }
@@ -316,12 +326,15 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
     let transfer = app.settings.features.transfer;
     let in_conference = !calls.conference_of(id).is_empty();
     let can_merge = !calls.mergeable(id).is_empty() && confirmed;
+    let record = app.settings.recording.button;
+    let recording = call.info.recording;
     for row in 0..2 {
-        // Without call transfer the second row has two buttons, still centred.
-        let buttons = if row == 1 && !transfer { 2.0 } else { 3.0 };
-        let row_width = buttons * 76.0 + (buttons - 1.0) * 12.0;
+        // The second row holds what's on (transfer, record), still centred.
+        let buttons = if row == 0 { 3.0 } else { 2.0 + f32::from(u8::from(transfer)) + f32::from(u8::from(record)) };
+        let gap = if buttons > 3.0 { 6.0 } else { 12.0 };
+        let row_width = buttons * 76.0 + (buttons - 1.0) * gap;
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.spacing_mut().item_spacing.x = gap;
             ui.add_space(((ui.available_width() - row_width) / 2.0).max(0.0));
             if row == 0 {
                 if control(ui, p, if mic_muted { Icon::MicOff } else { Icon::Mic }, if mic_muted { "Unmute" } else { "Mute" }, mic_muted, true) {
@@ -347,6 +360,9 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
                     }
                 } else if control(ui, p, Icon::AddCall, "Add call", false, true) {
                     app.ui.adding_call = true;
+                }
+                if record && control(ui, p, Icon::Record, if recording { "Stop rec." } else { "Record" }, recording, confirmed) {
+                    app.act(|c| c.toggle_recording(id));
                 }
             }
         });

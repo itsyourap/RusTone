@@ -147,6 +147,46 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Recording");
+        card(ui, p, |ui| {
+            let recording = &mut app.settings.recording;
+            let mut changed = false;
+            for (value, title, description) in [
+                (&mut recording.button, "Record button", Some("Show Record in the call controls")),
+                (&mut recording.auto, "Record every call", Some("Starts when a call is answered")),
+            ] {
+                setting_row(ui, p, title, description, |ui| {
+                    changed |= widgets::toggle(ui, p, value, title).changed();
+                });
+            }
+            ui.separator();
+            let shown = recording.dir().display().to_string();
+            ui.label(egui::RichText::new("Folder").size(12.0).color(p.secondary));
+            ui.add(egui::Label::new(egui::RichText::new(&shown).size(12.5).color(p.text)).wrap());
+            ui.horizontal(|ui| {
+                if ui.button("Change…").clicked()
+                    && let Some(folder) = rfd::FileDialog::new().set_title("Recordings folder").set_directory(recording.dir()).pick_folder()
+                {
+                    recording.folder = folder.display().to_string();
+                    changed = true;
+                }
+                if !recording.folder.is_empty() && ui.button("Use default").clicked() {
+                    recording.folder.clear();
+                    changed = true;
+                }
+                if ui.button("Open").clicked() {
+                    let dir = recording.dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                }
+            });
+            ui.label(egui::RichText::new("Recordings are WAV files with both sides of the call.").size(12.0).color(p.dim));
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Feature codes");
         card(ui, p, |ui| {
             let calls = &mut app.settings.calls;

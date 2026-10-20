@@ -174,6 +174,18 @@ pub unsafe extern "C" fn on_call_state(call_id: pjsua_call_id, _e: *mut pjsip_ev
             return;
         }
         let ended = info.state == CallState::Disconnected;
+        // Auto-recording starts once the call is answered.
+        if info.state == CallState::Confirmed
+            && super::record::auto_record()
+            && !super::record::is_recording(call_id)
+            && let Err(reason) = super::record::start(call_id)
+        {
+            emit(Event::CallError { call: Some(call_id), reason });
+        }
+        let info = if info.state == CallState::Confirmed { calls::call_info(call_id).unwrap_or(info) } else { info };
+        if ended && let Some(path) = super::record::stop(call_id) {
+            emit(Event::RecordingSaved { call: call_id, path });
+        }
         emit(Event::Call(info));
         if ended {
             send_engine(Message::CallEnded(call_id));

@@ -445,6 +445,7 @@ mod tests {
             sending_video: false,
             camera_off: false,
             in_conference: false,
+            recording: false,
             sip_call_id: "x".into(),
             caller_id: caller_id.map(str::to_owned),
             user_agent: None,

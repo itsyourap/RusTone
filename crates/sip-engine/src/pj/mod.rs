@@ -8,6 +8,7 @@ pub mod debug;
 mod messages;
 mod presence;
 mod quality;
+mod record;
 mod util;
 mod vidtap;
 mod video;
@@ -20,6 +21,7 @@ pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_o
 pub use audio::signal_levels;
 pub use calls::{leave_conference, report_calls, set_levels};
 pub use quality::QualityMonitor;
+pub use record::{RecordingOptions, set_options as set_recording};
 pub use vidtap::set_frames as set_video_frames;
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
@@ -740,6 +742,20 @@ impl Session {
         check(unsafe { pjsua_call_set_hold(call, std::ptr::null()) }, "holding the call")
     }
 
+    /// Starts or stops recording a call; reports the saved file or why it
+    /// couldn't record.
+    pub fn record(&self, call: CallId, on: bool) {
+        if on {
+            if let Err(reason) = record::start(call) {
+                log::warn!("{reason}");
+                callbacks::emit(crate::Event::CallError { call: Some(call), reason });
+            }
+        } else if let Some(path) = record::stop(call) {
+            callbacks::emit(crate::Event::RecordingSaved { call, path });
+        }
+        calls::report_calls();
+    }
+
     /// Joins `calls` in a conference: held ones are resumed, and each
     /// joins the others once its media flows.
     pub fn merge(&self, calls: &[CallId]) -> Result<(), String> {
@@ -863,6 +879,7 @@ impl Session {
         self.buddies.clear();
         self.stop_sound();
         calls::drop_all_tonegens();
+        record::stop_all();
         debug::remove_taps();
         debug::remove_message_tap();
         // SAFETY: on the engine thread; pjsua was created by `start`.

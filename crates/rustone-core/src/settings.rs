@@ -22,6 +22,7 @@ pub struct Settings {
     pub audio: AudioSettings,
     pub features: FeatureSettings,
     pub video: VideoSettings,
+    pub recording: RecordingSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,
@@ -237,6 +238,35 @@ pub struct FeatureSettings {
 impl Default for FeatureSettings {
     fn default() -> Self {
         Self { presence: true, messages: true, transfer: true, video: true }
+    }
+}
+
+/// Call recording. Always WAV.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecordingSettings {
+    /// Folder for recordings; empty for "RusTone Recordings" in Documents.
+    pub folder: String,
+    /// Record every call once it's answered.
+    pub auto: bool,
+    /// Show the Record button during calls.
+    pub button: bool,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self { folder: String::new(), auto: false, button: true }
+    }
+}
+
+impl RecordingSettings {
+    /// Where recordings go: the chosen folder, or Documents\RusTone Recordings.
+    pub fn dir(&self) -> std::path::PathBuf {
+        if !self.folder.trim().is_empty() {
+            return self.folder.trim().into();
+        }
+        let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from).unwrap_or_default();
+        home.join("Documents").join("RusTone Recordings")
     }
 }
 

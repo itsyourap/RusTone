@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use common::Peer;
-use sip_engine::{CallInfo, Command, Engine, EngineConfig, Event, LocalAccountConfig};
+use sip_engine::{CallInfo, Command, Engine, EngineConfig, Event, LocalAccountConfig, RecordingOptions};
 
 const CALLER: &str = "127.0.0.1:5071";
 const ENGINE: &str = "127.0.0.1:5060";
@@ -117,6 +117,46 @@ fn responses_headers_and_delayed_commands() {
     // A conference of one ends.
     wait_conference(false);
     engine.send(Command::HangupAll);
-    std::thread::sleep(Duration::from_millis(500));
+    for _ in 0..2 {
+        let bye = peer.recv("a conference BYE", |m| m.is_request("BYE"));
+        peer.reply(&bye, "200 OK", "", "");
+    }
+
+    // 6. Recording: a WAV with a header, saved when the call ends.
+    let dir = std::env::temp_dir().join(format!("rustone-rec-test-{}", std::process::id()));
+    engine.send(Command::SetRecording(RecordingOptions { dir: dir.clone(), auto: false, label: "Test".into() }));
+    peer.invite(ENGINE, "rec-1", "400", "");
+    let call = incoming("rec-1");
+    engine.send(Command::Answer { call: call.id, code: 200, video: false });
+    let ok = peer.recv("the 200", |m| m.code() == 200 && m.header("Call-ID") == "rec-1");
+    peer.ack(ENGINE, &ok);
+    std::thread::sleep(Duration::from_millis(300));
+    engine.send(Command::Record { call: call.id, on: true });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(Instant::now() < deadline, "not recording");
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Event::Call(c)) if c.id == call.id && c.recording => break,
+            Ok(Event::CallError { reason, .. }) => panic!("{reason}"),
+            _ => {}
+        }
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    engine.send(Command::Hangup(call.id));
+    let bye = peer.recv("the BYE", |m| m.is_request("BYE"));
+    peer.reply(&bye, "200 OK", "", "");
+    let path = loop {
+        assert!(Instant::now() < deadline + Duration::from_secs(5), "no RecordingSaved");
+        if let Ok(Event::RecordingSaved { path, .. }) = rx.recv_timeout(Duration::from_millis(200)) {
+            break path;
+        }
+    };
+    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(name.ends_with("-400-incoming-Test.wav"), "the recording's name: {name}");
+    let wav = std::fs::read(&path).expect("the recording exists");
+    assert!(wav.starts_with(b"RIFF") && &wav[8..12] == b"WAVE", "a WAV file");
+    assert!(wav.len() > 44 + 8000, "about a second of audio: {} bytes", wav.len());
+    let _ = std::fs::remove_dir_all(&dir);
+    std::thread::sleep(Duration::from_millis(300));
     drop(engine);
 }

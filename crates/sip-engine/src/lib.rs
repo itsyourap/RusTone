@@ -30,7 +30,7 @@ pub use audio::{AudioDevice, AudioDevices, Levels, Meters};
 pub use call::{CallId, CallInfo, CallState, CodecInfo, Direction, DtmfMethod, MediaState, Sound, uri_user_host};
 pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
 pub use event::{Event, RegState};
-pub use pj::CallOptions;
+pub use pj::{CallOptions, RecordingOptions};
 pub use message::{IncomingMessage, MessageId, MessageStatus};
 pub use presence::{Presence, PresenceState};
 pub use quality::CallQuality;
@@ -87,6 +87,10 @@ pub enum Command {
     Merge(Vec<CallId>),
     /// Take a call out of the conference; it stays connected to us.
     Separate(CallId),
+    /// Start or stop recording a call (with its conference) to WAV.
+    Record { call: CallId, on: bool },
+    /// Where recordings go, and whether answered calls are recorded.
+    SetRecording(RecordingOptions),
     /// Mute the microphone and/or the speaker (levels, all calls).
     SetMute { mic: bool, speaker: bool },
     SendDtmf { call: CallId, digits: String, method: DtmfMethod },
@@ -417,6 +421,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetRecording(options) => pj::set_recording(options),
             Command::MonitorCalls(on) => {
                 meters_on = on;
                 next_meter = Instant::now();
@@ -488,6 +493,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
             call_error(calls.first().copied(), s.merge(&calls));
             pj::report_calls();
         }
+        Command::Record { call, on } => s.record(call, on),
         Command::Separate(call) => {
             pj::leave_conference(call);
             pj::report_calls();
@@ -518,6 +524,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::Suspend
         | Command::Resume
         | Command::SetCallOptions(_)
+        | Command::SetRecording(_)
         | Command::SetAudioDevices(_)
         | Command::SetBuddies(_)
         | Command::SetLevels(_)

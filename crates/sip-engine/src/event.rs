@@ -46,6 +46,8 @@ pub enum Event {
     TransferStatus { call: CallId, code: u16, text: String, done: bool },
     /// A call command failed (hold, transfer, DTMF...).
     CallError { call: Option<CallId>, reason: String },
+    /// A recording was closed (the call ended or recording stopped).
+    RecordingSaved { call: CallId, path: std::path::PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

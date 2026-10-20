@@ -24,6 +24,7 @@ struct Applied {
     levels: Option<Levels>,
     meters: Option<bool>,
     buddies: Option<Vec<String>>,
+    recording: Option<sip_engine::RecordingOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +167,15 @@ impl Sip {
         if self.applied.options != Some(options) {
             engine.send(Command::SetCallOptions(options));
             self.applied.options = Some(options);
+        }
+        let recording = sip_engine::RecordingOptions {
+            dir: settings.recording.dir(),
+            auto: settings.recording.auto,
+            label: settings.active().map(|a| a.label.trim().to_owned()).unwrap_or_default(),
+        };
+        if self.applied.recording.as_ref() != Some(&recording) {
+            engine.send(Command::SetRecording(recording.clone()));
+            self.applied.recording = Some(recording);
         }
         let devices = audio_devices(&settings.audio);
         if self.applied.devices.as_ref() != Some(&devices) {

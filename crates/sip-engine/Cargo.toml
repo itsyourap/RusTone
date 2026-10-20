@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 pjsua-sys.workspace = true
 log.workspace = true
+jiff = "0.2"
 
 # Sound-device hot-plug notifications (IMMNotificationClient).
 [target.'cfg(windows)'.dependencies]

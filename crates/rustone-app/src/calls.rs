@@ -237,6 +237,10 @@ impl CallBook {
             Event::Call(info) => self.update(info, cfg, &mut out),
             Event::CallFailed { target, reason } => self.notify(format!("Couldn't call {target}: {reason}")),
             Event::CallError { reason, .. } => self.notify(reason.clone()),
+            Event::RecordingSaved { path, .. } => {
+                let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+                self.notice = Some((format!("Recording saved: {name}"), Instant::now()));
+            }
             Event::CallQuality(q) => {
                 if let Some(c) = self.get_mut(q.call) {
                     c.quality = Some(q.clone());
@@ -603,6 +607,12 @@ impl CallBook {
         vec![Command::Merge(ids)]
     }
 
+    /// Starts or stops recording a call (and its conference).
+    pub fn toggle_recording(&self, id: CallId) -> Vec<Command> {
+        let Some(call) = self.get(id).filter(|c| c.info.state == CallState::Confirmed) else { return Vec::new() };
+        vec![Command::Record { call: id, on: !call.info.recording }]
+    }
+
     /// Takes a call out of its conference; it stays connected.
     pub fn separate(&self, id: CallId) -> Vec<Command> {
         if self.conference_of(id).is_empty() { Vec::new() } else { vec![Command::Separate(id)] }
@@ -732,6 +742,7 @@ mod tests {
             sending_video: false,
             camera_off: false,
             in_conference: false,
+            recording: false,
             sip_call_id: format!("sip-{id}"),
             caller_id: None,
             user_agent: None,
