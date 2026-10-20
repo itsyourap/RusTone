@@ -59,22 +59,24 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         );
         let more = widgets::icon_button(ui, p, Icon::More, p.text, "More");
         egui::Popup::menu(&more).show(|ui| {
-            if ui.button("Export history (.csv)…").clicked() {
-                app.phonebook.pick_export_history();
-                ui.close();
-            }
-            let text = if app.ui.history.confirm_clear { "Click again to clear the history" } else { "Clear history" };
-            if ui.add(egui::Button::new(egui::RichText::new(text).color(p.danger))).clicked() {
-                if app.ui.history.confirm_clear {
-                    if let Err(e) = app.phonebook.clear_calls() {
-                        app.notify(format!("Couldn't clear the history: {e}"));
-                    }
-                    app.ui.history.confirm_clear = false;
+            widgets::menu(ui, |ui| {
+                if ui.button("Export history (.csv)…").clicked() {
+                    app.phonebook.pick_export_history();
                     ui.close();
-                } else {
-                    app.ui.history.confirm_clear = true;
                 }
-            }
+                let text = if app.ui.history.confirm_clear { "Click again to clear the history" } else { "Clear history" };
+                if ui.add(egui::Button::new(egui::RichText::new(text).color(p.danger))).clicked() {
+                    if app.ui.history.confirm_clear {
+                        if let Err(e) = app.phonebook.clear_calls() {
+                            app.notify(format!("Couldn't clear the history: {e}"));
+                        }
+                        app.ui.history.confirm_clear = false;
+                        ui.close();
+                    } else {
+                        app.ui.history.confirm_clear = true;
+                    }
+                }
+            });
         });
     });
     ui.add_space(6.0);

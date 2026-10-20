@@ -92,14 +92,16 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
         let more = widgets::icon_button(ui, p, Icon::More, p.text, "More");
         egui::Popup::menu(&more).show(|ui| {
-            if ui.button("Import contacts (.vcf)…").clicked() {
-                app.phonebook.pick_import();
-                ui.close();
-            }
-            if ui.button("Export contacts (.vcf)…").clicked() {
-                app.phonebook.pick_export();
-                ui.close();
-            }
+            widgets::menu(ui, |ui| {
+                if ui.button("Import contacts (.vcf)…").clicked() {
+                    app.phonebook.pick_import();
+                    ui.close();
+                }
+                if ui.button("Export contacts (.vcf)…").clicked() {
+                    app.phonebook.pick_export();
+                    ui.close();
+                }
+            });
         });
     });
     ui.add_space(6.0);

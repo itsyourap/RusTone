@@ -285,6 +285,15 @@ pub fn initials(title: &str) -> Option<String> {
     (!letters.is_empty()).then(|| letters.to_uppercase())
 }
 
+/// A popup menu's contents with room around each entry: egui's menu style
+/// packs buttons tightly, so the hover highlight hugs the text. Entries are
+/// justified so every highlight spans the menu.
+pub fn menu<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.spacing_mut().button_padding = vec2(14.0, 7.0);
+    ui.spacing_mut().item_spacing.y = 2.0;
+    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), add).inner
+}
+
 /// What happened to a [`level_slider`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LevelResponse {
@@ -372,6 +381,24 @@ mod tests {
         assert_eq!(initials("192.168.29.54"), None);
         assert_eq!(initials("(none)").as_deref(), Some("N"));
         assert_eq!(initials(""), None);
+    }
+
+    #[test]
+    fn menu_entries_have_room_and_equal_width() {
+        let harness = crate::ui::test_support::harness([300.0, 120.0], (), |ui, _| {
+            menu(ui, |ui| {
+                ui.set_max_width(220.0);
+                let _ = ui.button("Import contacts (.vcf)…");
+                let _ = ui.button("Export");
+            });
+        });
+        let import = harness.get_by_label("Import contacts (.vcf)…").rect();
+        let export = harness.get_by_label("Export").rect();
+        assert_eq!(import.width(), export.width(), "highlights span the menu");
+        let text = egui::FontId::proportional(14.0);
+        let text_width = harness.ctx.fonts_mut(|f| f.layout_no_wrap("Import contacts (.vcf)…".into(), text, egui::Color32::WHITE).size().x);
+        assert!(import.width() >= text_width + 2.0 * 14.0 - 1.0, "{import:?} vs text {text_width}");
+        assert!(import.height() >= 30.0, "{import:?}");
     }
 
     #[test]
