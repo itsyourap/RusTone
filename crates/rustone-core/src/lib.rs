@@ -2,6 +2,8 @@
 
 pub mod account;
 pub mod codecs;
+pub mod contacts;
 pub mod secrets;
 pub mod settings;
 pub mod sounds;
+pub mod store;
