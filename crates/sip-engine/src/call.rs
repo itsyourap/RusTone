@@ -78,6 +78,8 @@ pub struct CallInfo {
     pub receiving_video: bool,
     /// The peer accepts our video (our camera may still be off).
     pub sending_video: bool,
+    /// Mixed with other calls in a conference.
+    pub in_conference: bool,
     /// We stopped sending our camera (or the peer added video and it
     /// hasn't been turned on yet).
     pub camera_off: bool,

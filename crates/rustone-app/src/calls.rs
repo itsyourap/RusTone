@@ -542,20 +542,70 @@ impl CallBook {
         if !audible && self.playing == Some(Playing::Ringtone) { vec![self.stop()] } else { Vec::new() }
     }
 
+    /// Hangs up a call, or the whole conference it's in.
     pub fn hangup(&self, id: CallId) -> Vec<Command> {
-        vec![Command::Hangup(id)]
+        let members = self.conference_of(id);
+        if members.is_empty() { vec![Command::Hangup(id)] } else { members.into_iter().map(Command::Hangup).collect() }
     }
 
+    /// Holds or resumes a call; in a conference, every member together.
     pub fn toggle_hold(&mut self, id: CallId) -> Vec<Command> {
-        let Some(call) = self.get_mut(id) else { return Vec::new() };
-        match call.info.media {
-            MediaState::LocalHold | MediaState::None if call.info.state == CallState::Confirmed => vec![Command::Unhold(id)],
-            _ if call.info.state == CallState::Confirmed => {
-                call.hold_requested = true;
-                vec![Command::Hold(id)]
-            }
-            _ => Vec::new(),
+        let Some(call) = self.get(id) else { return Vec::new() };
+        if call.info.state != CallState::Confirmed {
+            return Vec::new();
         }
+        let resume = matches!(call.info.media, MediaState::LocalHold | MediaState::None);
+        let members = self.conference_of(id);
+        let ids = if members.is_empty() { vec![id] } else { members };
+        let mut commands = Vec::new();
+        for id in ids {
+            let Some(call) = self.get_mut(id) else { continue };
+            if resume {
+                commands.push(Command::Unhold(id));
+            } else {
+                call.hold_requested = true;
+                commands.push(Command::Hold(id));
+            }
+        }
+        commands
+    }
+
+    /// The live members of the conference `id` is in (empty if none).
+    pub fn conference_of(&self, id: CallId) -> Vec<CallId> {
+        if !self.get(id).is_some_and(|c| c.info.in_conference) {
+            return Vec::new();
+        }
+        self.calls.iter().filter(|c| c.is_live() && c.info.in_conference).map(Call::id).collect()
+    }
+
+    /// Answered calls that could join `id` in a conference.
+    pub fn mergeable(&self, id: CallId) -> Vec<CallId> {
+        let members = self.conference_of(id);
+        self.calls
+            .iter()
+            .filter(|c| c.is_live() && c.id() != id && c.info.state == CallState::Confirmed && !members.contains(&c.id()))
+            .map(Call::id)
+            .collect()
+    }
+
+    /// Merges `id` with the other answered calls into one conference.
+    pub fn merge(&mut self, id: CallId) -> Vec<Command> {
+        let others = self.mergeable(id);
+        if others.is_empty() {
+            return Vec::new();
+        }
+        let mut ids = vec![id];
+        ids.extend(self.conference_of(id).into_iter().filter(|&c| c != id));
+        ids.extend(others);
+        for c in self.calls.iter_mut().filter(|c| ids.contains(&c.id())) {
+            c.hold_requested = false;
+        }
+        vec![Command::Merge(ids)]
+    }
+
+    /// Takes a call out of its conference; it stays connected.
+    pub fn separate(&self, id: CallId) -> Vec<Command> {
+        if self.conference_of(id).is_empty() { Vec::new() } else { vec![Command::Separate(id)] }
     }
 
     /// Makes `id` the shown call; resuming it holds the others.
@@ -681,6 +731,7 @@ mod tests {
             receiving_video: false,
             sending_video: false,
             camera_off: false,
+            in_conference: false,
             sip_call_id: format!("sip-{id}"),
             caller_id: None,
             user_agent: None,
@@ -850,6 +901,32 @@ mod tests {
         // On but empty: a normal transfer.
         let empty = CallSettings { transfer_code: " ".into(), ..codes };
         assert_eq!(b.transfer(1, "200", &empty), [Command::Transfer { call: 1, target: "200".into() }]);
+    }
+
+    #[test]
+    fn conference_merges_holds_and_ends_together() {
+        let cfg = CallSettings::default();
+        let mut b = book();
+        let answered = |id, media, conf| {
+            let mut i = info(id, Direction::Outgoing, CallState::Confirmed, &format!("<sip:{id}00@pbx>"));
+            i.media = media;
+            i.in_conference = conf;
+            i
+        };
+        b.on_event(&Event::Call(answered(1, MediaState::LocalHold, false)), &cfg);
+        b.on_event(&Event::Call(answered(2, MediaState::Active, false)), &cfg);
+        assert_eq!(b.mergeable(2), [1]);
+        assert_eq!(b.merge(2), [Command::Merge(vec![2, 1])]);
+        b.on_event(&Event::Call(answered(1, MediaState::Active, true)), &cfg);
+        b.on_event(&Event::Call(answered(2, MediaState::Active, true)), &cfg);
+        assert!(b.mergeable(2).is_empty(), "nothing left to merge");
+        assert_eq!(b.toggle_hold(2), [Command::Hold(1), Command::Hold(2)], "held together");
+        assert_eq!(b.hangup(2), [Command::Hangup(1), Command::Hangup(2)], "ended together");
+        assert_eq!(b.separate(1), [Command::Separate(1)]);
+
+        // A third call can join the running conference.
+        b.on_event(&Event::Call(answered(3, MediaState::LocalHold, false)), &cfg);
+        assert_eq!(b.merge(2), [Command::Merge(vec![2, 1, 3])]);
     }
 
     #[test]

@@ -82,6 +82,11 @@ pub enum Command {
     HangupAll,
     Hold(CallId),
     Unhold(CallId),
+    /// Join calls in a conference (resuming held ones), or add calls to
+    /// the running one.
+    Merge(Vec<CallId>),
+    /// Take a call out of the conference; it stays connected to us.
+    Separate(CallId),
     /// Mute the microphone and/or the speaker (levels, all calls).
     SetMute { mic: bool, speaker: bool },
     SendDtmf { call: CallId, digits: String, method: DtmfMethod },
@@ -479,6 +484,14 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::HangupAll => s.hangup_all(),
         Command::Hold(call) => call_error(Some(call), s.hold(call)),
         Command::Unhold(call) => call_error(Some(call), s.unhold(call)),
+        Command::Merge(calls) => {
+            call_error(calls.first().copied(), s.merge(&calls));
+            pj::report_calls();
+        }
+        Command::Separate(call) => {
+            pj::leave_conference(call);
+            pj::report_calls();
+        }
         Command::SetMute { mic, speaker } => s.set_mute(mic, speaker),
         Command::SendDtmf { call, digits, method } => call_error(Some(call), s.send_dtmf(call, &digits, method)),
         Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),

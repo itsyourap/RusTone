@@ -89,6 +89,34 @@ fn responses_headers_and_delayed_commands() {
     assert_eq!(froms.len(), 1, "one From: {froms:?}");
     assert!(froms[0].contains("anonymous@anonymous.invalid"), "anonymous From: {froms:?}");
     peer.reply(&invite, "486 Busy Here", "", "");
+
+    // 5. Conference: two answered calls merged, then one separated.
+    let mut ids = Vec::new();
+    for n in ["conf-a", "conf-b"] {
+        peer.invite(ENGINE, n, "300", "");
+        let call = incoming(n);
+        engine.send(Command::Answer { call: call.id, code: 200, video: false });
+        let ok = peer.recv("the 200", |m| m.code() == 200 && m.header("Call-ID") == n);
+        peer.ack(ENGINE, &ok);
+        ids.push(call.id);
+    }
     std::thread::sleep(Duration::from_millis(300));
+    engine.send(Command::Merge(ids.clone()));
+    let wait_conference = |want: bool| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut seen = std::collections::HashMap::new();
+        while ids.iter().any(|id| seen.get(id) != Some(&want)) {
+            assert!(Instant::now() < deadline, "conference state {want} not reported: {seen:?}");
+            if let Ok(Event::Call(c)) = rx.recv_timeout(Duration::from_millis(200)) {
+                seen.insert(c.id, c.in_conference);
+            }
+        }
+    };
+    wait_conference(true);
+    engine.send(Command::Separate(ids[0]));
+    // A conference of one ends.
+    wait_conference(false);
+    engine.send(Command::HangupAll);
+    std::thread::sleep(Duration::from_millis(500));
     drop(engine);
 }

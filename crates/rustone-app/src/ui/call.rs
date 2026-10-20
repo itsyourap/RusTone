@@ -44,9 +44,15 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
             ui.add_space(8.0);
         }
         let shows_video = call.info.video && call.ended.is_none();
-        party_header(ui, p, &call, &caller(app, &call), compact || shows_video);
+        let conference = app.sip.calls.conference_of(call.id());
+        if conference.is_empty() {
+            party_header(ui, p, &call, &caller(app, &call), compact || shows_video);
+        } else {
+            conference_header(ui, app, p, &call, &conference);
+        }
         // Video can be added to an answered audio call.
         let can_add_video = app.settings.features.video
+            && conference.is_empty()
             && !call.info.video
             && call.info.state == CallState::Confirmed
             && call.info.media == MediaState::Active
@@ -141,7 +147,9 @@ pub fn return_bar(ui: &mut Ui, app: &mut App, p: &Palette) -> bool {
 }
 
 fn others_strip(ui: &mut Ui, app: &mut App, current: CallId) {
-    let others: Vec<Call> = app.sip.calls.visible().filter(|c| c.id() != current).cloned().collect();
+    // Conference members are listed in the conference header instead.
+    let members = app.sip.calls.conference_of(current);
+    let others: Vec<Call> = app.sip.calls.visible().filter(|c| c.id() != current && !members.contains(&c.id())).cloned().collect();
     if others.is_empty() {
         return;
     }
@@ -164,6 +172,32 @@ pub fn caller(app: &App, call: &Call) -> String {
     match app.phonebook.lookup(&party.user) {
         Some(contact) => contact.title(),
         None => party.title().to_owned(),
+    }
+}
+
+/// A conference: how many are in it, and each member with buttons to take
+/// them out of it or hang them up.
+fn conference_header(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, members: &[CallId]) {
+    ui.label(egui::RichText::new("Conference").font(Weight::SemiBold.font_id(22.0)).color(p.text));
+    let status = format!("{} people · {}", members.len() + 1, call.status_text());
+    ui.label(egui::RichText::new(status).font(Weight::Medium.font_id(15.0)).color(p.secondary));
+    ui.add_space(8.0);
+    let width = ui.available_width().min(320.0);
+    for &id in members {
+        let Some(member) = app.sip.calls.get(id).cloned() else { continue };
+        let name = caller(app, &member);
+        ui.allocate_ui_with_layout(vec2(width, 34.0), Layout::left_to_right(Align::Center), |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(&name).size(14.0).color(p.text)).truncate());
+            ui.label(egui::RichText::new(member.status_text()).size(12.0).color(p.dim));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if widgets::icon_button(ui, p, Icon::PhoneOff, p.danger, &format!("Hang up {name}")).clicked() {
+                    app.sip.send(sip_engine::Command::Hangup(id));
+                }
+                if ui.button("Separate").on_hover_text("Take out of the conference").clicked() {
+                    app.act(|c| c.separate(id));
+                }
+            });
+        });
     }
 }
 
@@ -280,6 +314,8 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
 
     let width = 3.0 * 76.0 + 2.0 * 12.0;
     let transfer = app.settings.features.transfer;
+    let in_conference = !calls.conference_of(id).is_empty();
+    let can_merge = !calls.mergeable(id).is_empty() && confirmed;
     for row in 0..2 {
         // Without call transfer the second row has two buttons, still centred.
         let buttons = if row == 1 && !transfer { 2.0 } else { 3.0 };
@@ -301,10 +337,15 @@ fn controls(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call) {
                 if control(ui, p, if held { Icon::Play } else { Icon::Pause }, if held { "Resume" } else { "Hold" }, held, confirmed) {
                     app.act(|c| c.toggle_hold(id));
                 }
-                if transfer && control(ui, p, Icon::Transfer, "Transfer", false, confirmed) {
+                if transfer && control(ui, p, Icon::Transfer, "Transfer", false, confirmed && !in_conference) {
                     app.ui.call_panel = CallPanel::Transfer { target: String::new() };
                 }
-                if control(ui, p, Icon::AddCall, "Add call", false, true) {
+                // With another answered call, "Add call" becomes "Merge".
+                if can_merge {
+                    if control(ui, p, Icon::Users, "Merge", false, true) {
+                        app.act(|c| c.merge(id));
+                    }
+                } else if control(ui, p, Icon::AddCall, "Add call", false, true) {
                     app.ui.adding_call = true;
                 }
             }

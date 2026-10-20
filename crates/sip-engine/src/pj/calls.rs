@@ -91,6 +91,13 @@ pub fn forget_call(call_id: CallId) {
     lock(&HEADERS).remove(&call_id);
     lock(&CAMERA_OFF).remove(&call_id);
     lock(&PEER_ADDS_VIDEO).remove(&call_id);
+    {
+        let mut members = lock(&CONFERENCE);
+        members.remove(&call_id);
+        if members.len() < 2 {
+            members.clear();
+        }
+    }
     super::vidtap::forget_call(call_id);
     drop_tonegen(ToneKey::Call(call_id));
 }
@@ -135,6 +142,7 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
         receiving_video: video_stream(ci).is_some_and(|v| v.decoder.is_some()),
         sending_video: video_stream(ci).is_some_and(|v| v.dir & PJMEDIA_DIR_ENCODING != 0),
         camera_off: lock(&CAMERA_OFF).contains(&ci.id),
+        in_conference: lock(&CONFERENCE).contains(&ci.id),
         sip_call_id: pj_to_string(&ci.call_id),
         caller_id: headers.caller_id,
         user_agent: headers.user_agent,
@@ -306,9 +314,10 @@ pub fn update_media(call_id: CallId) {
     super::vidtap::update_call(call_id, decoder);
     let Some(info) = call_info(call_id) else { return };
     let Some(slot) = call_slot(call_id) else { return };
+    let flowing = matches!(info.media, MediaState::Active | MediaState::RemoteHold);
     // SAFETY: valid slots of this pjsua instance.
     unsafe {
-        if matches!(info.media, MediaState::Active | MediaState::RemoteHold) {
+        if flowing {
             pjsua_conf_connect(slot, 0);
             pjsua_conf_connect(0, slot);
             super::debug::tap_call(slot);
@@ -318,7 +327,80 @@ pub fn update_media(call_id: CallId) {
             drop_tonegen(ToneKey::Call(call_id));
         }
     }
+    // A conference member hears the others.
+    if lock(&CONFERENCE).contains(&call_id) {
+        for other in conference_peers(call_id) {
+            // SAFETY: valid slots of this pjsua instance.
+            unsafe {
+                if flowing {
+                    pjsua_conf_connect(slot, other);
+                    pjsua_conf_connect(other, slot);
+                } else {
+                    pjsua_conf_disconnect(slot, other);
+                    pjsua_conf_disconnect(other, slot);
+                }
+            }
+        }
+    }
     apply_levels();
+}
+
+// ---------------------------------------------------------------------------
+// Conference: calls mixed together in the local bridge.
+// Each member's audio goes to the others and to us.
+
+static CONFERENCE: LazyLock<Mutex<HashSet<CallId>>> = LazyLock::new(Mutex::default);
+
+/// The other members' bridge slots, while their media flows.
+fn conference_peers(call_id: CallId) -> Vec<pjsua_conf_port_id> {
+    let members: Vec<CallId> = lock(&CONFERENCE).iter().copied().filter(|&c| c != call_id).collect();
+    members
+        .into_iter()
+        .filter(|&c| call_info(c).is_some_and(|i| matches!(i.media, MediaState::Active | MediaState::RemoteHold)))
+        .filter_map(call_slot)
+        .collect()
+}
+
+/// Puts `calls` in the conference and connects them to its members.
+pub fn join_conference(calls: &[CallId]) {
+    lock(&CONFERENCE).extend(calls.iter().copied());
+    for &call in calls {
+        update_media(call);
+    }
+}
+
+/// Takes `call` out of the conference; a conference of one ends too.
+pub fn leave_conference(call: CallId) {
+    let Some(slot) = call_slot(call) else {
+        lock(&CONFERENCE).remove(&call);
+        return;
+    };
+    for other in conference_peers(call) {
+        // SAFETY: valid slots of this pjsua instance.
+        unsafe {
+            pjsua_conf_disconnect(slot, other);
+            pjsua_conf_disconnect(other, slot);
+        }
+    }
+    let mut members = lock(&CONFERENCE);
+    members.remove(&call);
+    if members.len() < 2 {
+        members.clear();
+    }
+}
+
+/// Sends every call's snapshot, after a change pjsua doesn't report
+/// (joining or leaving the conference).
+pub fn report_calls() {
+    for id in call_ids() {
+        if let Some(info) = call_info(id) {
+            super::callbacks::emit(crate::Event::Call(info));
+        }
+    }
+}
+
+pub fn in_conference(call: CallId) -> bool {
+    lock(&CONFERENCE).contains(&call)
 }
 
 /// Whether any call's audio is connected to the sound device.

@@ -18,7 +18,7 @@ use pjsua_sys::*;
 
 pub use callbacks::{CallOptions, install_sink, remove_sink, set_engine_tx, set_options};
 pub use audio::signal_levels;
-pub use calls::set_levels;
+pub use calls::{leave_conference, report_calls, set_levels};
 pub use quality::QualityMonitor;
 pub use vidtap::set_frames as set_video_frames;
 use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
@@ -738,6 +738,21 @@ impl Session {
     pub fn hold(&self, call: CallId) -> Result<(), String> {
         // SAFETY: plain pjsua call.
         check(unsafe { pjsua_call_set_hold(call, std::ptr::null()) }, "holding the call")
+    }
+
+    /// Joins `calls` in a conference: held ones are resumed, and each
+    /// joins the others once its media flows.
+    pub fn merge(&self, calls: &[CallId]) -> Result<(), String> {
+        if calls.len() < 2 && !calls.iter().any(|&c| calls::in_conference(c)) {
+            return Err("a conference needs two calls".into());
+        }
+        for &call in calls {
+            if calls::call_info(call).is_some_and(|i| matches!(i.media, crate::MediaState::LocalHold | crate::MediaState::None)) {
+                self.unhold(call)?;
+            }
+        }
+        calls::join_conference(calls);
+        Ok(())
     }
 
     pub fn unhold(&self, call: CallId) -> Result<(), String> {
