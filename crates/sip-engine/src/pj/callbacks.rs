@@ -191,6 +191,10 @@ pub unsafe extern "C" fn on_call_media_state(call_id: pjsua_call_id) {
     });
 }
 
+pub unsafe extern "C" fn on_call_rx_offer(call_id: pjsua_call_id, offer: *const pjmedia_sdp_session, _reserved: *mut c_void, _code: *mut pjsip_status_code, opt: *mut pjsua_call_setting) {
+    guard(|| calls::on_reoffer(call_id, offer, opt));
+}
+
 pub unsafe extern "C" fn on_dtmf_digit(call_id: pjsua_call_id, digit: c_int) {
     guard(|| {
         let Some(digit) = u8::try_from(digit).ok().map(char::from) else { return };

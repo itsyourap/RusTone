@@ -559,7 +559,7 @@ mod tests {
             connected_for: Duration::ZERO,
             remote_video: false,
             video: false,
-            sending_video: false,
+            camera_off: false,
             sip_call_id: format!("sip-{id}"),
             caller_id: None,
             user_agent: None,

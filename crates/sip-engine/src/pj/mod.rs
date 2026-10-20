@@ -128,6 +128,7 @@ impl Session {
         ua.cb.on_incoming_call = Some(callbacks::on_incoming_call);
         ua.cb.on_call_state = Some(callbacks::on_call_state);
         ua.cb.on_call_media_state = Some(callbacks::on_call_media_state);
+        ua.cb.on_call_rx_offer = Some(callbacks::on_call_rx_offer);
         ua.cb.on_dtmf_digit = Some(callbacks::on_dtmf_digit);
         ua.cb.on_call_transfer_request2 = Some(callbacks::on_call_transfer_request2);
         ua.cb.on_call_transfer_status = Some(callbacks::on_call_transfer_status);
@@ -170,6 +171,7 @@ impl Session {
         }
         self.set_audio_codecs(&cfg.audio_codecs);
         video::apply_codecs(&cfg.video);
+        calls::set_accept_video(cfg.video.enabled);
         self.video_devices = video::devices();
         for d in &self.video_devices {
             log::info!("video device {}: {} ({}{})", d.index, d.name, d.driver, if d.capture { ", camera" } else { "" });
@@ -457,11 +459,16 @@ impl Session {
     }
 
     /// Pauses or resumes sending our camera during a call.
-    pub fn set_video_sending(&self, call: CallId, on: bool) -> Result<(), String> {
-        pj_default!(param: pjsua_call_vid_strm_op_param = pjsua_call_vid_strm_op_param_default);
-        let op = if on { PJSUA_CALL_VID_STRM_START_TRANSMIT } else { PJSUA_CALL_VID_STRM_STOP_TRANSMIT };
-        // SAFETY: `param` initialised in place.
-        check(unsafe { pjsua_call_set_vid_strm(call, op, &param) }, if on { "turning the camera on" } else { "turning the camera off" })
+    pub fn set_video_sending(&mut self, call: CallId, on: bool) -> Result<(), String> {
+        if on {
+            // The picture-in-picture shows what we send.
+            self.set_preview(true);
+        }
+        calls::set_camera(call, on)?;
+        if let Some(info) = calls::call_info(call) {
+            callbacks::emit(crate::Event::Call(info));
+        }
+        Ok(())
     }
 
     /// Adds video to a call that has none (a re-INVITE).
@@ -473,6 +480,7 @@ impl Session {
         param.dir = PJMEDIA_DIR_ENCODING_DECODING;
         param.cap_dev = self.camera();
         self.set_preview(true);
+        calls::adding_video(call);
         // SAFETY: `param` initialised in place.
         check(unsafe { pjsua_call_set_vid_strm(call, PJSUA_CALL_VID_STRM_ADD, &param) }, "adding video")
     }

@@ -441,7 +441,7 @@ mod tests {
             connected_for: std::time::Duration::from_secs(65),
             remote_video: false,
             video: false,
-            sending_video: false,
+            camera_off: false,
             sip_call_id: "x".into(),
             caller_id: caller_id.map(str::to_owned),
             user_agent: None,
