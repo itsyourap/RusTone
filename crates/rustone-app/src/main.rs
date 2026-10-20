@@ -163,7 +163,15 @@ fn main() -> ExitCode {
 /// Settings from disk. An unreadable file is kept aside and replaced by defaults.
 fn load_settings(path: &Path) -> Settings {
     match Settings::load(path) {
-        Ok(settings) => settings,
+        Ok(mut settings) => {
+            if settings.grow_window_to_default() {
+                // Saved now, so the step runs once.
+                if let Err(e) = fastframe_file::write(path, settings.to_toml()) {
+                    log::warn!("cannot save {}: {e}", path.display());
+                }
+            }
+            settings
+        }
         Err(e) => {
             let aside = path.with_extension("toml.bad");
             log::warn!("{e}; keeping it as {} and using defaults", aside.display());

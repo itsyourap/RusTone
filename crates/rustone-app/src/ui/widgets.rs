@@ -176,7 +176,8 @@ pub fn setting_stack(ui: &mut Ui, p: &Palette, title: &str, description: Option<
 fn setting_text(ui: &mut Ui, p: &Palette, title: &str, description: Option<&str>) {
     ui.add(
         egui::Label::new(egui::RichText::new(title).font(Weight::Medium.font_id(14.0)).color(p.text))
-            .wrap_mode(egui::TextWrapMode::Extend),
+            // Long titles wrap in the space the control leaves, as the description does.
+            .wrap_mode(egui::TextWrapMode::Wrap),
     );
     if let Some(description) = description {
         ui.label(egui::RichText::new(description).size(12.0).color(p.dim));
@@ -362,7 +363,7 @@ pub fn level_slider(ui: &mut Ui, p: &Palette, icons: (Icon, Icon), label: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     #[test]
     fn initials_from_names_and_numbers() {
@@ -371,6 +372,21 @@ mod tests {
         assert_eq!(initials("192.168.29.54"), None);
         assert_eq!(initials("(none)").as_deref(), Some("N"));
         assert_eq!(initials(""), None);
+    }
+
+    #[test]
+    fn long_setting_titles_wrap_beside_the_control() {
+        let title = "Use my codec order for incoming calls";
+        let harness = crate::ui::test_support::harness([260.0, 120.0], false, move |ui, on| {
+            setting_row(ui, &Palette::dark(), title, Some("Otherwise the caller's preferred codec wins"), |ui| {
+                toggle(ui, &Palette::dark(), on, title);
+            });
+        });
+        let nodes: Vec<_> = harness.query_all_by_label(title).collect();
+        let text = nodes.iter().find(|n| n.accesskit_node().role() == egui::accesskit::Role::Label).expect("title text").rect();
+        let switch = nodes.iter().find(|n| n.accesskit_node().role() != egui::accesskit::Role::Label).expect("toggle").rect();
+        assert!(text.right() <= switch.left(), "title {text:?} runs under the toggle {switch:?}");
+        assert!(text.height() > 25.0, "the title wraps onto a second line: {text:?}");
     }
 
     #[test]

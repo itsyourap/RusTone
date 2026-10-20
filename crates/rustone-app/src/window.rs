@@ -39,7 +39,7 @@ pub fn native_options(app: &App) -> eframe::NativeOptions {
         .with_title("RusTone")
         .with_app_id("rustone")
         .with_icon(crate::icons::window_icon())
-        .with_inner_size([380.0, 680.0])
+        .with_inner_size(rustone_core::settings::DEFAULT_WINDOW_SIZE)
         .with_min_inner_size([340.0, 520.0])
         .with_decorations(!fastframe_titlebar::enabled());
     eframe::NativeOptions {

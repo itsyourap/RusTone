@@ -181,7 +181,15 @@ pub struct UiSettings {
     pub window: WindowGeometry,
     /// egui zoom factor (Ctrl +/-).
     pub zoom: f32,
+    /// The default window height already applied to a saved size (see
+    /// [`Settings::grow_window_to_default`]); 0 in files from before it.
+    #[serde(default)]
+    pub applied_default_height: f32,
 }
+
+/// The main window's default size, logical pixels: tall enough for the
+/// call screen without scrolling.
+pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [380.0, 780.0];
 
 impl Default for UiSettings {
     fn default() -> Self {
@@ -192,6 +200,7 @@ impl Default for UiSettings {
             start_minimized: false,
             window: WindowGeometry::default(),
             zoom: 1.0,
+            applied_default_height: DEFAULT_WINDOW_SIZE[1],
         }
     }
 }
@@ -273,6 +282,23 @@ impl Settings {
             self.active_account = self.accounts.first().map(|a| a.id);
         }
         Some(removed)
+    }
+
+    /// Once per new default height: a saved window shorter than it grows to
+    /// it (a window made smaller afterwards stays so). Returns whether the
+    /// settings changed.
+    pub fn grow_window_to_default(&mut self) -> bool {
+        let default = DEFAULT_WINDOW_SIZE[1];
+        if self.ui.applied_default_height >= default {
+            return false;
+        }
+        self.ui.applied_default_height = default;
+        if let Some(size) = &mut self.ui.window.size
+            && size[1] < default
+        {
+            size[1] = default;
+        }
+        true
     }
 
     /// Reads `path`. A missing file gives the defaults.
@@ -372,6 +398,24 @@ output_device = \"Speakers (Realtek)\"").unwrap().audio;
         assert_eq!(a.output_device, "Speakers (Realtek)");
         assert!(a.input_device.is_empty() && a.ring_device.is_empty());
         assert_eq!((a.volume_output, a.volume_input, a.volume_ring), (100, 100, 100));
+    }
+
+    #[test]
+    fn saved_windows_grow_once_to_a_taller_default() {
+        let mut old = Settings::from_toml("[ui.window]
+size = [340.0, 709.6]
+").unwrap();
+        assert!(old.grow_window_to_default());
+        assert_eq!(old.ui.window.size, Some([340.0, DEFAULT_WINDOW_SIZE[1]]));
+        old.ui.window.size = Some([340.0, 600.0]);
+        assert!(!old.grow_window_to_default(), "a later choice stays");
+        let mut fresh = Settings::default();
+        assert!(!fresh.grow_window_to_default());
+        let mut tall = Settings::from_toml("[ui.window]
+size = [400.0, 900.0]
+").unwrap();
+        tall.grow_window_to_default();
+        assert_eq!(tall.ui.window.size, Some([400.0, 900.0]));
     }
 
     #[test]
