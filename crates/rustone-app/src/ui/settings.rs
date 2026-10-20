@@ -213,6 +213,30 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Command hooks");
+        card(ui, p, |ui| {
+            ui.label(egui::RichText::new("Programs to run on call events. {number}, {name}, {callid}, {direction}, {duration} and {time} are filled in; without them the number is added at the end.").size(12.0).color(p.dim));
+            let hooks = &mut app.settings.hooks;
+            let mut changed = false;
+            for (value, label) in [
+                (&mut hooks.outgoing_call, "Outgoing call"),
+                (&mut hooks.incoming_call, "Incoming call"),
+                (&mut hooks.call_ring, "Ringing"),
+                (&mut hooks.call_answer, "Answered (incoming)"),
+                (&mut hooks.call_answer_video, "Answered with video"),
+                (&mut hooks.call_start, "Call started"),
+                (&mut hooks.call_busy, "Busy or declined"),
+                (&mut hooks.call_end, "Call ended"),
+            ] {
+                changed |= widgets::text_field(ui, p, label, "Command line", value).changed();
+                ui.add_space(4.0);
+            }
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Features");
         card(ui, p, |ui| {
             ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));

@@ -6,6 +6,7 @@
 mod app;
 mod calls;
 mod directory;
+mod hookrun;
 mod icons;
 mod idle;
 mod netwatch;

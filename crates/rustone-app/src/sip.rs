@@ -264,6 +264,9 @@ impl Sip {
             let outcome = self.calls.on_event(&event, &settings.calls);
             polled.show_window |= outcome.show_window;
             polled.ended.extend(outcome.ended);
+            for (kind, call) in &outcome.hooks {
+                crate::hookrun::run(&settings.hooks, *kind, call);
+            }
             self.run(outcome.commands);
             match event {
                 Event::Started => self.engine_state = EngineState::Running,

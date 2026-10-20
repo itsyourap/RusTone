@@ -23,6 +23,7 @@ pub struct Settings {
     pub features: FeatureSettings,
     pub video: VideoSettings,
     pub recording: RecordingSettings,
+    pub hooks: crate::hooks::HookSettings,
     /// Id of the account in use (one account at a time).
     pub active_account: Option<u32>,
     pub accounts: Vec<Account>,

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
+use rustone_core::hooks::{HookCall, HookKind};
 use rustone_core::settings::{AutoAnswerWhen, CallSettings, DtmfMethod};
 use sip_engine::{CallId, CallInfo, CallState, Command, Direction, Event, MediaState, Sound, uri_user_host};
 
@@ -70,6 +71,18 @@ impl Call {
     /// Who's on the other end: the caller ID when the network gave one.
     pub fn party(&self) -> Party {
         Party::parse(self.info.caller_id.as_deref().unwrap_or(&self.info.remote))
+    }
+
+    /// What a command hook gets to know about the call.
+    pub fn hook_call(&self) -> HookCall {
+        let party = self.party();
+        HookCall {
+            number: party.user.clone(),
+            name: party.name.clone().unwrap_or_default(),
+            call_id: self.info.sip_call_id.clone(),
+            incoming: self.info.direction == Direction::Incoming,
+            duration_secs: self.duration().map_or(0, |d| d.as_secs()),
+        }
     }
 
     pub fn duration(&self) -> Option<Duration> {
@@ -149,6 +162,8 @@ pub struct Outcome {
     pub show_window: bool,
     /// Calls that just ended, for the history (rejected duplicates excluded).
     pub ended: Vec<EndedCall>,
+    /// Command hooks to run.
+    pub hooks: Vec<(HookKind, HookCall)>,
 }
 
 /// A finished call, as the history needs it.
@@ -274,6 +289,8 @@ impl CallBook {
     fn incoming(&mut self, info: &CallInfo, cfg: &CallSettings, out: &mut Outcome) {
         self.calls.retain(|c| c.id() != info.id || c.ended.is_none());
         let mut call = Call::new(info.clone());
+        // The incoming-call hook runs before the rules.
+        out.hooks.push((HookKind::IncomingCall, call.hook_call()));
         let key = uri_user_host(&info.remote);
         let local = uri_user_host(&info.local);
         let addresses = rustone_core::rules::Addresses { local: &local, remote: &key };
@@ -345,6 +362,9 @@ impl CallBook {
         } else {
             out.commands.push(self.play(Playing::Ringtone, &self.sounds.ringtone.clone(), true, self.ring_level));
         }
+        if let Some(call) = self.get(info.id) {
+            out.hooks.push((HookKind::CallRing, call.hook_call()));
+        }
         self.current = Some(info.id);
         out.show_window = cfg.bring_to_front;
     }
@@ -375,6 +395,9 @@ impl CallBook {
                 return;
             }
             self.calls.push(Call::new(info.clone()));
+            if info.direction == Direction::Outgoing {
+                out.hooks.push((HookKind::OutgoingCall, Call::new(info.clone()).hook_call()));
+            }
             // A new outgoing call takes the screen, unless an incoming call
             // is ringing there (it needs an answer).
             let ringing_shown = self.current.and_then(|c| self.get(c)).is_some_and(Call::is_ringing_in);
@@ -401,6 +424,14 @@ impl CallBook {
         call.info = info.clone();
         if info.state == CallState::Confirmed && call.answered.is_none() {
             call.answered = Some(Instant::now().checked_sub(info.connected_for).unwrap_or_else(Instant::now));
+            let hook = call.hook_call();
+            if info.direction == Direction::Incoming {
+                out.hooks.push((HookKind::CallAnswer, hook.clone()));
+                if info.remote_video {
+                    out.hooks.push((HookKind::CallAnswerVideo, hook.clone()));
+                }
+            }
+            out.hooks.push((HookKind::CallStart, hook));
             if cfg.auto_hangup > 0 {
                 // Auto hang-up: BYE with a Warning.
                 let end = Command::End { call: id, code: 200, headers: vec![("Warning".into(), "399 localhost \"Call duration exceeded\"".into())] };
@@ -437,6 +468,8 @@ impl CallBook {
         if info.state == CallState::Disconnected {
             let reason = end_reason(info, was_answered);
             if let Some(call) = self.get_mut(id) {
+                let kind = if matches!(info.status_code, 486 | 600 | 603) { HookKind::CallBusy } else { HookKind::CallEnd };
+                out.hooks.push((kind, call.hook_call()));
                 call.ended = Some(Instant::now());
                 call.end_reason = Some(reason.clone());
                 out.ended.push(EndedCall { info: info.clone(), started: call.started, answered: was_answered, reason });
@@ -938,6 +971,30 @@ mod tests {
         // A third call can join the running conference.
         b.on_event(&Event::Call(answered(3, MediaState::LocalHold, false)), &cfg);
         assert_eq!(b.merge(2), [Command::Merge(vec![2, 1, 3])]);
+    }
+
+    #[test]
+    fn hooks_fire_on_call_events() {
+        let cfg = CallSettings::default();
+        let kinds = |out: &Outcome| out.hooks.iter().map(|(k, _)| *k).collect::<Vec<_>>();
+        let mut b = book();
+        let mut i = info(1, Direction::Incoming, CallState::Incoming, "\"Alice\" <sip:100@pbx>");
+        i.remote_video = true;
+        let out = b.on_event(&Event::IncomingCall(i.clone()), &cfg);
+        assert_eq!(kinds(&out), [HookKind::IncomingCall, HookKind::CallRing]);
+        assert_eq!((out.hooks[0].1.number.as_str(), out.hooks[0].1.name.as_str()), ("100", "Alice"));
+        i.state = CallState::Confirmed;
+        i.media = MediaState::Active;
+        assert_eq!(kinds(&b.on_event(&Event::Call(i.clone()), &cfg)), [HookKind::CallAnswer, HookKind::CallAnswerVideo, HookKind::CallStart]);
+        i.state = CallState::Disconnected;
+        i.status_code = 200;
+        assert_eq!(kinds(&b.on_event(&Event::Call(i), &cfg)), [HookKind::CallEnd]);
+
+        let mut o = info(2, Direction::Outgoing, CallState::Calling, "<sip:200@pbx>");
+        assert_eq!(kinds(&b.on_event(&Event::Call(o.clone()), &cfg)), [HookKind::OutgoingCall]);
+        o.state = CallState::Disconnected;
+        o.status_code = 486;
+        assert_eq!(kinds(&b.on_event(&Event::Call(o), &cfg)), [HookKind::CallBusy]);
     }
 
     #[test]
