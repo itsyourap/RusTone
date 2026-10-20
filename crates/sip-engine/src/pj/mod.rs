@@ -633,8 +633,12 @@ impl Session {
         // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
         // offers have none.
         opt.txt_cnt = 0;
-        // SAFETY: `opt` initialised in place.
-        check(unsafe { pjsua_call_answer2(call, &opt, c_uint::from(code), std::ptr::null(), std::ptr::null()) }, "answering")
+        // pjsua takes the call settings from the first answer that carries
+        // them and ignores later changes, so ringing (1xx) carries none and
+        // the real answer decides audio or video.
+        let opt_ptr: *const pjsua_call_setting = if code >= 200 { &opt } else { std::ptr::null() };
+        // SAFETY: `opt` initialised in place and outlives the call.
+        check(unsafe { pjsua_call_answer2(call, opt_ptr, c_uint::from(code), std::ptr::null(), std::ptr::null()) }, "answering")
     }
 
     /// Ends a call; with code 0 pjsua picks CANCEL, BYE or 603.
