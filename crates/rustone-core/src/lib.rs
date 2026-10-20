@@ -3,6 +3,7 @@
 pub mod account;
 pub mod codecs;
 pub mod contacts;
+pub mod dialplan;
 pub mod directory;
 pub mod history;
 pub mod messages;

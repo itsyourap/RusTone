@@ -44,7 +44,7 @@ pub struct Account {
     pub display_name: String,
     /// Prefix added to dialled numbers.
     pub dialing_prefix: String,
-    /// Dial plan rules, `|`-separated (applied in Phase 9).
+    /// Dial plan rules, `|`-separated (see [`crate::dialplan`]).
     pub dial_plan: String,
     /// Send `Privacy: id` with an anonymous From (Phase 9).
     pub hide_cid: bool,

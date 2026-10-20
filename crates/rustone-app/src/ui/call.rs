@@ -391,7 +391,10 @@ fn transfer(ui: &mut Ui, app: &mut App, p: &Palette, call: &Call, mut target: St
         let ready = !target.trim().is_empty();
         let cfg = app.settings.calls.clone();
         if ui.add_enabled(ready, egui::Button::new("Transfer").min_size(vec2(ui.available_width(), 34.0))).clicked() || (enter && ready) {
-            app.act(|c| c.transfer(call.id(), target.trim(), &cfg));
+            match app.format_number(target.trim()) {
+                Ok(formatted) => app.act(|c| c.transfer(call.id(), &formatted, &cfg)),
+                Err(message) => app.notify(message),
+            }
             close = true;
         }
         // The PBX's attended transfer: it calls the number, we hang up to connect.

@@ -2279,6 +2279,7 @@ version = "0.1.0"
 dependencies = [
  "keyring-core",
  "md-5",
+ "regex",
  "roxmltree 0.21.1",
  "rusqlite",
  "serde",

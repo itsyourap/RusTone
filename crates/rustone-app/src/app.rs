@@ -379,6 +379,13 @@ impl App {
     }
 
     /// Runs a call action and sends the commands it produces.
+    /// `number` with the main account's dialling prefix and dial plan;
+    /// the notice to show when the dial plan blocks it.
+    pub fn format_number(&self, number: &str) -> Result<String, String> {
+        let Some(account) = self.settings.active() else { return Ok(number.to_owned()) };
+        rustone_core::dialplan::format_number(number, &account.dialing_prefix, &account.dial_plan).map_err(|_| format!("The dial plan doesn't allow {number}"))
+    }
+
     pub fn act(&mut self, action: impl FnOnce(&mut crate::calls::CallBook) -> Vec<sip_engine::Command>) {
         let commands = action(&mut self.sip.calls);
         self.sip.run(commands);

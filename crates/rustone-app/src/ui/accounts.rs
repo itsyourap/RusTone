@@ -198,7 +198,7 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
         card(ui, p, |ui| {
             widgets::text_field(ui, p, "Voicemail number", "Dialled by the voicemail button; enables MWI", &mut a.voicemail_number);
             widgets::text_field(ui, p, "Dialing prefix", "Added to dialled numbers", &mut a.dialing_prefix);
-            widgets::text_field(ui, p, "Dial plan", "Rules, |-separated", &mut a.dial_plan);
+            widgets::text_field(ui, p, "Dial plan", "e.g. <9:>1xxxxxxxxxx|xxx (x digit, . repeat, <a:b> replace)", &mut a.dial_plan);
             setting_row(ui, p, "Hide caller ID", None, |ui| {
                 widgets::toggle(ui, p, &mut a.hide_cid, "Hide caller ID");
             });

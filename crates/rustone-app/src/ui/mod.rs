@@ -142,7 +142,13 @@ fn dial(app: &mut App, target: &str, video: bool) {
     }
     let local = app.use_local_account(target);
     let video = video && app.settings.features.video;
-    app.act(|c| c.dial(target, local, video));
+    // The account's prefix and dial plan.
+    let target = if local { Ok(target.to_owned()) } else { app.format_number(target) };
+    let target = match target {
+        Ok(target) => target,
+        Err(message) => return app.notify(message),
+    };
+    app.act(|c| c.dial(&target, local, video));
     app.ui.adding_call = false;
     app.ui.call_panel = call::CallPanel::None;
 }
