@@ -129,20 +129,28 @@ mod tests {
         assert!(!move_secret(&old, &new, "missing").unwrap());
     }
 
+    /// `Keyring::init` sets the process's default store, so the tests that
+    /// use Credential Manager take turns.
+    #[cfg(windows)]
+    static CREDENTIAL_MANAGER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Writes and removes one entry in Windows Credential Manager.
     #[cfg(windows)]
     #[test]
     fn windows_credential_manager() {
+        let _turn = CREDENTIAL_MANAGER.lock().unwrap_or_else(|e| e.into_inner());
         let store = Keyring::init("RusTone-test").unwrap();
         exercise(&store, "unit-test-entry");
     }
 
-    /// The RusTone → RusTone rename: names differing only in case.
+    /// A rename between names differing only in case (Credential Manager
+    /// ignores case).
     #[cfg(windows)]
     #[test]
     fn windows_credentials_survive_a_case_rename() {
+        let _turn = CREDENTIAL_MANAGER.lock().unwrap_or_else(|e| e.into_inner());
         let new = Keyring::init("RusTone-rename-test").unwrap();
-        let old = new.with_service("RusTone-rename-test");
+        let old = new.with_service("rustone-rename-test");
         old.set("acc", "pw").unwrap();
         assert!(move_secret(&old, &new, "acc").unwrap());
         assert_eq!(new.get("acc").unwrap().as_deref(), Some("pw"));
