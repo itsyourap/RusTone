@@ -5,6 +5,7 @@ use crate::call::{CallId, CallInfo, CodecInfo};
 use crate::message::{IncomingMessage, MessageStatus};
 use crate::presence::Presence;
 use crate::quality::CallQuality;
+use crate::video::VideoDevice;
 
 /// Events are delivered on pjsua's worker threads or the engine thread; the
 /// sink must be cheap and must not block (queue them and wake the UI).
@@ -16,6 +17,8 @@ pub enum Event {
     Codecs(Vec<CodecInfo>),
     /// The sound devices pjsua sees (after start and after hot-plug).
     AudioDevices(Vec<AudioDevice>),
+    /// The video devices pjsua sees (after start).
+    VideoDevices(Vec<VideoDevice>),
     /// A text message arrived.
     MessageReceived(IncomingMessage),
     /// A message we sent got its final answer (or couldn't be sent).

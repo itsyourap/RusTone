@@ -34,6 +34,7 @@ pub struct EngineConfig {
     pub log_file: Option<PathBuf>,
     /// Use no sound device (tests, headless use).
     pub null_audio: bool,
+    pub video: crate::video::VideoConfig,
 }
 
 impl Default for EngineConfig {
@@ -53,6 +54,7 @@ impl Default for EngineConfig {
             local_account: false,
             log_file: None,
             null_audio: false,
+            video: crate::video::VideoConfig::default(),
         }
     }
 }

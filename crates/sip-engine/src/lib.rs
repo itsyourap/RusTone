@@ -18,6 +18,7 @@ mod hotplug;
 mod pj;
 mod presence;
 mod quality;
+mod video;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +34,7 @@ pub use pj::CallOptions;
 pub use message::{IncomingMessage, MessageId, MessageStatus};
 pub use presence::{Presence, PresenceState};
 pub use quality::CallQuality;
+pub use video::{VideoConfig, VideoDevice};
 
 /// Receives engine events. Called from pjsua's threads: keep it short.
 pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
@@ -86,6 +88,8 @@ pub enum Command {
     MonitorCalls(bool),
     /// Speaker and microphone levels; applies without a restart.
     SetLevels(Levels),
+    /// Show or hide the camera preview (Settings' preview button).
+    SetPreview(bool),
     /// Watch these numbers' presence (contacts with presence on).
     SetBuddies(Vec<String>),
     /// Use these sound devices (by name); applies without a restart.
@@ -406,6 +410,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::SendDtmf { call, digits, method } => call_error(Some(call), s.send_dtmf(call, &digits, method)),
         Command::PlayLocalDigits(digits) => s.play_local_digits(&digits),
         Command::Transfer { call, target } => call_error(Some(call), s.transfer(call, &target)),
+        Command::SetPreview(on) => s.set_preview(on),
         Command::SendMessage { id, target, text, local } => {
             if let Err(reason) = s.send_message(id, &target, &text, local) {
                 log::warn!("message not sent: {reason}");
@@ -438,6 +443,7 @@ fn start(config: &EngineConfig, sink: &Sink) -> Option<pj::Session> {
             sink(Event::Started);
             sink(Event::Codecs(session.codecs()));
             sink(Event::AudioDevices(session.audio_devices().to_vec()));
+            sink(Event::VideoDevices(session.video_devices().to_vec()));
             Some(session)
         }
         Err(e) => {

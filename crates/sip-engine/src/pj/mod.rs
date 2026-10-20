@@ -9,6 +9,7 @@ mod messages;
 mod presence;
 mod quality;
 mod util;
+mod video;
 
 use std::ffi::{c_int, c_uint};
 
@@ -54,6 +55,10 @@ pub struct Session {
     wanted_buddies: Vec<String>,
     buddies: presence::Buddies,
     presence_ready: bool,
+    /// Video settings, the cameras pjsua sees, and the running preview's camera.
+    video: crate::video::VideoConfig,
+    video_devices: Vec<crate::video::VideoDevice>,
+    preview: Option<i32>,
     stopped: bool,
 }
 
@@ -80,6 +85,9 @@ impl Session {
             wanted_buddies: Vec::new(),
             buddies: presence::Buddies::default(),
             presence_ready: false,
+            video: cfg.video.clone(),
+            video_devices: Vec::new(),
+            preview: None,
             stopped: false,
         };
         match session.init(cfg) {
@@ -159,6 +167,11 @@ impl Session {
             check(unsafe { pjsua_set_null_snd_dev() }, "selecting no sound device")?;
         }
         self.set_audio_codecs(&cfg.audio_codecs);
+        video::apply_codecs(&cfg.video);
+        self.video_devices = video::devices();
+        for d in &self.video_devices {
+            log::info!("video device {}: {} ({}{})", d.index, d.name, d.driver, if d.capture { ", camera" } else { "" });
+        }
         self.devices = audio::devices();
         for d in &self.devices {
             log::info!("sound device {}: {} ({}, {} in, {} out)", d.index, d.name, d.driver, d.inputs, d.outputs);
@@ -351,6 +364,13 @@ impl Session {
         ac.allow_contact_rewrite = if a.allow_rewrite { 2 } else { 0 };
         ac.contact_rewrite_method = (PJSUA_CONTACT_REWRITE_ALWAYS_UPDATE | PJSUA_CONTACT_REWRITE_UNREGISTER) as c_int;
         ac.publish_enabled = a.publish.into();
+        // Video: show and send automatically, with the chosen camera.
+        if self.video.enabled {
+            ac.vid_in_auto_show = PJ_TRUE;
+            ac.vid_out_auto_transmit = PJ_TRUE;
+            ac.vid_cap_dev = self.camera();
+            ac.vid_wnd_flags = video::WND_BORDER | video::WND_RESIZABLE;
+        }
         ac.mwi_enabled = a.mwi.into();
         if a.transport == Transport::Udp && self.udp != PJSUA_INVALID_ID {
             ac.transport_id = self.udp;
@@ -419,6 +439,34 @@ impl Session {
         // SAFETY: on the engine thread with pjsua running.
         if let Err(e) = check(unsafe { pjsua_handle_ip_change(&param) }, "handling the network change") {
             log::warn!("{e}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Video
+
+    pub fn video_devices(&self) -> &[crate::video::VideoDevice] {
+        &self.video_devices
+    }
+
+    fn camera(&self) -> i32 {
+        crate::video::camera_index(&self.video.camera, &self.video_devices)
+    }
+
+    /// Shows or hides the local preview of the chosen camera.
+    pub fn set_preview(&mut self, on: bool) {
+        match (on, self.preview) {
+            (true, None) if self.video.enabled => {
+                let camera = self.camera();
+                if video::start_preview(camera) {
+                    self.preview = Some(camera);
+                }
+            }
+            (false, Some(camera)) => {
+                video::stop_preview(camera);
+                self.preview = None;
+            }
+            _ => {}
         }
     }
 
@@ -553,6 +601,11 @@ impl Session {
         }
         let uri = self.target_uri(target, local)?;
         self.use_call_devices();
+        let video = video && self.video.enabled;
+        if video {
+            // The preview shows before the INVITE goes out.
+            self.set_preview(true);
+        }
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
         // pjsua 2.17 offers RFC 4103 real-time text by default; RusTone's
@@ -567,9 +620,13 @@ impl Session {
 
     /// Sends a provisional or final response to an incoming call (180, 200,
     /// 486...). 200 answers with audio, plus video when asked.
-    pub fn answer(&self, call: CallId, code: u16, video: bool) -> Result<(), String> {
+    pub fn answer(&mut self, call: CallId, code: u16, video: bool) -> Result<(), String> {
+        let video = video && self.video.enabled;
         if code == 200 {
             self.use_call_devices();
+            if video {
+                self.set_preview(true);
+            }
         }
         pj_default!(opt: pjsua_call_setting = pjsua_call_setting_default);
         opt.vid_cnt = c_uint::from(video);
@@ -699,6 +756,7 @@ impl Session {
             return;
         }
         callbacks::set_main_account(PJSUA_INVALID_ID);
+        self.set_preview(false);
         self.buddies.clear();
         self.stop_sound();
         calls::drop_all_tonegens();
