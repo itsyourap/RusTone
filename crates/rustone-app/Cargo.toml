@@ -37,6 +37,7 @@ egui_plot = "0.37"
 realfft = "3.5"
 jiff = "0.2"
 rfd = "0.17.2"
+ureq = "3.4.2"
 
 [dev-dependencies]
 egui_kittest = "0.36.1"

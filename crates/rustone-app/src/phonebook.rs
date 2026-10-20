@@ -95,6 +95,23 @@ impl Phonebook {
         Ok(())
     }
 
+    /// Applies a users-directory merge.
+    pub fn apply_directory(&mut self, plan: &rustone_core::directory::MergePlan) -> Result<(), String> {
+        if plan.is_empty() {
+            return Ok(());
+        }
+        let store = self.store.as_mut().ok_or("no contacts database")?;
+        for c in &plan.update {
+            store.save_contact(c)?;
+        }
+        for id in &plan.remove {
+            store.delete_contact(*id)?;
+        }
+        store.add_contacts(&plan.add)?;
+        self.reload();
+        Ok(())
+    }
+
     /// Adds the contacts in a vCard file, skipping numbers already in the
     /// book. Returns (added, skipped).
     pub fn import(&mut self, text: &str) -> Result<(usize, usize), String> {

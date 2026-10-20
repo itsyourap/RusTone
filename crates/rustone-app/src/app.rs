@@ -76,6 +76,7 @@ pub struct App {
     requests: Requests,
     pub sip: Sip,
     pub phonebook: crate::phonebook::Phonebook,
+    pub directory: crate::directory::UsersDirectory,
     /// Missed calls since the Calls page was last open.
     pub missed: u32,
     notifier: Option<fastframe_notifications::Client>,
@@ -153,6 +154,7 @@ impl App {
             requests,
             sip,
             phonebook: crate::phonebook::Phonebook::open(&paths.database),
+            directory: crate::directory::UsersDirectory::default(),
             missed: 0,
             notifier: notifier(),
             missed_toast: None,
@@ -247,6 +249,23 @@ impl App {
         }
     }
 
+    /// The users-directory URL's placeholder values, from the active account.
+    fn directory_values(&self) -> rustone_core::directory::UrlValues {
+        let mut v = rustone_core::directory::UrlValues {
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            time: jiff::Timestamp::now().as_second(),
+            ..Default::default()
+        };
+        if let Some(a) = self.settings.active() {
+            v.username = a.username.trim().to_owned();
+            v.password = a.password.clone();
+            v.server = a.server.trim().to_owned();
+            v.domain = a.domain.trim().to_owned();
+            v.label = a.title().to_owned();
+        }
+        v
+    }
+
     /// Shows `text` briefly at the bottom of the window.
     pub fn notify(&mut self, text: impl Into<String>) {
         self.sip.calls.notice = Some((text.into(), Instant::now()));
@@ -315,6 +334,12 @@ impl App {
         }
         self.sip.sync(&self.settings);
         self.sip.set_buddies(self.phonebook.watched_numbers());
+        let values = self.directory_values();
+        let ready = matches!(self.sip.reg, sip_engine::RegState::Registered { .. } | sip_engine::RegState::NoRegistrar);
+        let template = self.settings.sip.users_directory.clone();
+        if let Some(message) = self.directory.tick(&template, &values, ready, &mut self.phonebook, &self.waker) {
+            self.notify(message);
+        }
         let polled = self.sip.poll(&self.settings);
         if !polled.ended.is_empty() {
             let own_hosts: Vec<String> = self
@@ -411,6 +436,9 @@ impl App {
         };
         if let Some(retry) = self.taskbar.show(frame, self.missed, &label) {
             ctx.request_repaint_after(retry.saturating_duration_since(Instant::now()));
+        }
+        if let Some(due) = self.directory.next_load() {
+            ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
 
         // Decide here, not in `ui`: closing a minimised window from the

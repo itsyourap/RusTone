@@ -120,7 +120,14 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         for contact in &shown {
             let expanded = app.ui.contacts.expanded == Some(contact.id);
-            let presence = contact.presence.then(|| app.sip.presence.get(contact.number.trim()).cloned()).flatten();
+            // Subscribed presence, else what the users directory reports, which
+            // applies to any contact with the number.
+            let number = contact.number.trim();
+            let presence = contact
+                .presence
+                .then(|| app.sip.presence.get(number).cloned())
+                .flatten()
+                .or_else(|| app.directory.presence.get(number).cloned());
             let row = contact_row(ui, p, contact, presence.as_ref(), expanded);
             match row {
                 RowAction::None => {}

@@ -53,6 +53,9 @@ pub struct SipSettings {
     pub opus_stereo: bool,
     /// Answer incoming calls with our codec order.
     pub force_codec: bool,
+    /// URL of a users directory to keep the contacts in sync with;
+    /// empty for none.
+    pub users_directory: String,
     /// Write the full SIP log (holds numbers and addresses).
     pub enable_log: bool,
 }
@@ -75,6 +78,7 @@ impl Default for SipSettings {
             ec: true,
             opus_stereo: false,
             force_codec: false,
+            users_directory: String::new(),
             enable_log: false,
         }
     }

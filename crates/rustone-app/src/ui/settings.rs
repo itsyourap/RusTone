@@ -26,6 +26,27 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         codecs(ui, app, p);
         ui.add_space(12.0);
 
+        section_title(ui, p, "Users directory");
+        card(ui, p, |ui| {
+            let response = widgets::text_field(
+                ui,
+                p,
+                "Directory URL",
+                "https://… (JSON, XML, Yealink or CSV); {username} and %s fill in the account",
+                &mut app.settings.sip.users_directory,
+            );
+            if response.changed() {
+                app.mark_settings_dirty();
+            }
+            let status = match &app.directory.status {
+                Some(s) => s.clone(),
+                None if app.settings.sip.users_directory.trim().is_empty() => "Its contacts are added and kept up to date; yours are never changed.".to_owned(),
+                None => "Loading…".to_owned(),
+            };
+            ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Calls");
         card(ui, p, |ui| {
             let calls = &mut app.settings.calls;

@@ -5,6 +5,7 @@
 
 mod app;
 mod calls;
+mod directory;
 mod icons;
 mod netwatch;
 mod phonebook;
