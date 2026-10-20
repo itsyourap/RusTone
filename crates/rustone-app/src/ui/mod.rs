@@ -178,7 +178,8 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let status = app.status();
         let account = app.settings.active().cloned();
         let mut calls = app.settings.calls.clone();
-        let chip = status_chip(ui, p, &status, account.as_ref(), &mut calls);
+        let away = app.sip.online_status == sip_engine::OnlineStatus::Away;
+        let chip = status_chip(ui, p, &status, account.as_ref(), &mut calls, away);
         if let Some(copied) = chip.copied {
             app.notify(format!("Copied {copied}"));
         }
@@ -217,7 +218,7 @@ struct ChipOutcome {
 /// address and any error on hover. Shows "Do not disturb" while that's on.
 /// A click opens the call toggles; right-click copies the number or the
 /// address.
-fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>, calls: &mut CallSettings) -> ChipOutcome {
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>, calls: &mut CallSettings, away: bool) -> ChipOutcome {
     let (mut dot, text) = match status {
         Status::Online | Status::Ready => (p.success, p.secondary),
         Status::Starting | Status::Connecting => (p.warning, p.secondary),
@@ -225,10 +226,13 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
         Status::NoAccount | Status::Offline => (p.dim, p.secondary),
     };
     let dnd = calls.dnd && status.is_online();
+    let away = away && !dnd && status.is_online();
     if dnd {
         dot = p.danger;
+    } else if away {
+        dot = p.warning;
     }
-    let mut label = if dnd { "DND" } else { status.label() }.to_owned();
+    let mut label = if dnd { "DND" } else if away { "Away" } else { status.label() }.to_owned();
     if calls.auto_answer && status.is_online() {
         label.push_str(" · AA");
     }
@@ -412,7 +416,7 @@ mod tests {
     fn clicking_the_pill_turns_do_not_disturb_on() {
         use egui_kittest::kittest::Queryable;
         let mut harness = test_support::harness([300.0, 200.0], CallSettings::default(), |ui, calls| {
-            status_chip(ui, &Palette::dark(), &Status::Online, None, calls);
+            status_chip(ui, &Palette::dark(), &Status::Online, None, calls, false);
         });
         harness.get_by_label("Online").click();
         harness.run_steps(2);
@@ -429,7 +433,7 @@ mod tests {
         for (item, expected) in [("Copy phone number", "+910000000000"), ("Copy full SIP URI", "sip:+910000000000@sip.example.com")] {
             let mut harness = test_support::harness([300.0, 160.0], None::<String>, |ui, copied| {
                 let home = Account { label: "Home".into(), username: "+910000000000@sip.example.com".into(), ..Account::default() };
-                if let Some(c) = status_chip(ui, &Palette::dark(), &Status::Online, Some(&home), &mut CallSettings::default()).copied {
+                if let Some(c) = status_chip(ui, &Palette::dark(), &Status::Online, Some(&home), &mut CallSettings::default(), false).copied {
                     *copied = Some(c);
                 }
             });

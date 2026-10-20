@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use common::Peer;
-use sip_engine::{CallInfo, Command, Engine, EngineConfig, Event, LocalAccountConfig, RecordingOptions};
+use sip_engine::{CallInfo, Command, Engine, EngineConfig, Event, LocalAccountConfig, OnlineStatus, RecordingOptions};
 
 const CALLER: &str = "127.0.0.1:5071";
 const ENGINE: &str = "127.0.0.1:5060";
@@ -175,6 +175,18 @@ fn responses_headers_and_delayed_commands() {
         }
     };
     assert!(voicemail.waiting && voicemail.new == Some(3) && voicemail.old == Some(1), "{voicemail:?}");
+
+    // 8. Our presence: busy (DND) shows in the PIDF a subscriber gets.
+    engine.send(Command::SetOnlineStatus(OnlineStatus::Busy));
+    std::thread::sleep(Duration::from_millis(300));
+    let subscribe = format!(
+        "SUBSCRIBE sip:rustone-test@{ENGINE} SIP/2.0\r\nVia: SIP/2.0/UDP {CALLER};branch=z9hG4bK-pres1;rport\r\nMax-Forwards: 70\r\nFrom: <sip:watcher@{CALLER}>;tag=pres1\r\nTo: <sip:rustone-test@{ENGINE}>\r\nCall-ID: pres-1\r\nCSeq: 1 SUBSCRIBE\r\nEvent: presence\r\nAccept: application/pidf+xml\r\nExpires: 60\r\nContact: <sip:watcher@{CALLER}>\r\nContent-Length: 0\r\n\r\n"
+    );
+    peer.send(ENGINE.parse().unwrap(), &subscribe);
+    let notify = peer.recv("the presence NOTIFY", |m| m.is_request("NOTIFY") && m.header("Call-ID") == "pres-1");
+    peer.reply(&notify, "200 OK", "", "");
+    let pidf = notify.body.to_ascii_lowercase();
+    assert!(pidf.contains("busy"), "busy in the PIDF:\n{}", notify.body);
     std::thread::sleep(Duration::from_millis(300));
     drop(engine);
 }

@@ -36,8 +36,8 @@ fn watching_our_own_presence() {
     engine.send(Command::SetBuddies(vec!["rustone-buddy".into(), "rustone-same@127.0.0.1:5060".into()]));
     engine.send(Command::SetAccount(Some(AccountConfig { username: "rustone-buddy".into(), domain: "127.0.0.1:5060".into(), ..AccountConfig::default() })));
 
-    // Both numbers report under their own number. pjsua's own status starts
-    // offline (only DND and away are published), so NOTIFY says so.
+    // Both numbers report under their own number. The
+    // account publishes itself online when added, so NOTIFY says so.
     let mut seen = std::collections::HashMap::new();
     while seen.len() < 2 || seen.values().any(|s| *s == PresenceState::Unknown) {
         if let Event::Presence(p) = next("Presence") {
@@ -45,7 +45,7 @@ fn watching_our_own_presence() {
         }
     }
     assert!(seen.contains_key("rustone-buddy") && seen.contains_key("rustone-same@127.0.0.1:5060"), "{seen:?}");
-    assert!(seen.values().all(|s| *s == PresenceState::Offline), "{seen:?}");
+    assert!(seen.values().all(|s| *s == PresenceState::Online), "{seen:?}");
 
     // Dropping a number unsubscribes it; the engine keeps working.
     engine.send(Command::SetBuddies(vec!["rustone-same@127.0.0.1:5060".into()]));

@@ -13,6 +13,7 @@ use fastframe_tray::{Event, Tray};
 use rustone_core::secrets::{Keyring, MemoryStore, SecretStore};
 use rustone_core::settings::{Settings, WindowGeometry};
 
+use crate::idle::IdleWatch;
 use crate::netwatch::NetWatch;
 use crate::sip::{Sip, Status};
 use crate::theme::{self, Palette};
@@ -93,6 +94,7 @@ pub struct App {
     secrets: Box<dyn SecretStore>,
     power: fastframe_power::Power,
     net: NetWatch,
+    idle: IdleWatch,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -172,6 +174,10 @@ impl App {
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
+            idle: IdleWatch::spawn({
+                let wake = waker.clone();
+                move || wake.wake()
+            }),
             rendering: fastframe_text::detect(),
             next: Closed::Quit,
             quit_requested: false,
@@ -446,6 +452,14 @@ impl App {
         if self.net.take_changed() && self.settings.sip.network_changes {
             self.sip.send(sip_engine::Command::IpChanged);
         }
+        // Busy for DND, Away after 10 idle minutes.
+        self.sip.online_status = if self.settings.calls.dnd {
+            sip_engine::OnlineStatus::Busy
+        } else if self.idle.is_away() {
+            sip_engine::OnlineStatus::Away
+        } else {
+            sip_engine::OnlineStatus::Online
+        };
         self.sip.sync(&self.settings);
         // Without the presence feature nothing is subscribed; contacts keep their choice.
         let buddies = if self.settings.features.presence { self.phonebook.watched_numbers() } else { Vec::new() };

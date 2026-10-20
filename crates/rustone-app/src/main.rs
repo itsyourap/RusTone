@@ -7,6 +7,7 @@ mod app;
 mod calls;
 mod directory;
 mod icons;
+mod idle;
 mod netwatch;
 mod phonebook;
 mod sip;

@@ -48,6 +48,8 @@ pub struct Session {
     account_config: Option<AccountConfig>,
     /// The local account hides our caller ID.
     local_hide_cid: bool,
+    /// What we publish about ourselves; applied to accounts as they come.
+    online_status: crate::OnlineStatus,
     local_account: pjsua_acc_id,
     player: Option<calls::Player>,
     /// No sound device at all (tests, headless use).
@@ -83,6 +85,7 @@ impl Session {
             account: PJSUA_INVALID_ID,
             account_config: None,
             local_hide_cid: false,
+            online_status: crate::OnlineStatus::Online,
             local_account: PJSUA_INVALID_ID,
             player: None,
             null_audio: cfg.null_audio,
@@ -283,6 +286,7 @@ impl Session {
         match self.add_account(account) {
             Ok(id) => {
                 self.account = id;
+                self.publish_status();
                 if !registers {
                     sink(Event::Registration(RegState::NoRegistrar));
                     self.start_presence();
@@ -422,8 +426,39 @@ impl Session {
         let mut id = PJSUA_INVALID_ID;
         // SAFETY: as in `add_account`.
         match check(unsafe { pjsua_acc_add(&ac, PJ_TRUE, &mut id) }, "adding the local account") {
-            Ok(()) => self.local_account = id,
+            Ok(()) => {
+                self.local_account = id;
+                self.publish_status();
+            }
             Err(e) => log::warn!("{e}"),
+        }
+    }
+
+    /// Publishes ourselves as online, away or busy on every account.
+    pub fn set_online_status(&mut self, status: crate::OnlineStatus) {
+        self.online_status = status;
+        self.publish_status();
+    }
+
+    /// Publishes our status: RPID activity and its notes ("Idle" for
+    /// online, which other clients read as available).
+    fn publish_status(&self) {
+        let (activity, note) = match self.online_status {
+            crate::OnlineStatus::Online => (PJRPID_ACTIVITY_UNKNOWN, c"Idle"),
+            crate::OnlineStatus::Away => (PJRPID_ACTIVITY_AWAY, c"Away"),
+            crate::OnlineStatus::Busy => (PJRPID_ACTIVITY_BUSY, c"Busy"),
+        };
+        let pr = pjrpid_element {
+            type_: PJRPID_ELEMENT_TYPE_PERSON,
+            id: pj_str_t { ptr: std::ptr::null_mut(), slen: 0 },
+            activity,
+            note: pj_str_t { ptr: note.as_ptr().cast_mut(), slen: note.to_bytes().len() as pj_ssize_t },
+        };
+        for acc in [self.account, self.local_account] {
+            if acc != PJSUA_INVALID_ID {
+                // SAFETY: a valid account; pjsua copies `pr`.
+                unsafe { pjsua_acc_set_online_status2(acc, PJ_TRUE, &pr) };
+            }
         }
     }
 

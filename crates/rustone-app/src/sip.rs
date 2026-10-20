@@ -25,6 +25,7 @@ struct Applied {
     meters: Option<bool>,
     buddies: Option<Vec<String>>,
     recording: Option<sip_engine::RecordingOptions>,
+    online_status: Option<sip_engine::OnlineStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +88,8 @@ pub struct Sip {
     pub presence: std::collections::HashMap<String, sip_engine::Presence>,
     /// The voicemail box's latest summary (MWI).
     pub voicemail: Option<sip_engine::Voicemail>,
+    /// What to publish about ourselves; sent when it changes.
+    pub online_status: sip_engine::OnlineStatus,
     pub calls: CallBook,
     feed: Arc<DebugFeed>,
     meters: Arc<Meters>,
@@ -142,6 +145,7 @@ impl Sip {
             had_calls: false,
             presence: std::collections::HashMap::new(),
             voicemail: None,
+            online_status: sip_engine::OnlineStatus::Online,
             calls: CallBook::new(sounds),
         };
         sip.sync(settings);
@@ -177,6 +181,10 @@ impl Sip {
             auto: settings.recording.auto,
             label: settings.active().map(|a| a.label.trim().to_owned()).unwrap_or_default(),
         };
+        if self.applied.online_status != Some(self.online_status) {
+            engine.send(Command::SetOnlineStatus(self.online_status));
+            self.applied.online_status = Some(self.online_status);
+        }
         if self.applied.recording.as_ref() != Some(&recording) {
             engine.send(Command::SetRecording(recording.clone()));
             self.applied.recording = Some(recording);

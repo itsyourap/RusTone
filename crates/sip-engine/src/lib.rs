@@ -32,7 +32,7 @@ pub use config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transpor
 pub use event::{Event, RegState, Voicemail};
 pub use pj::{CallOptions, RecordingOptions};
 pub use message::{IncomingMessage, MessageId, MessageStatus};
-pub use presence::{Presence, PresenceState};
+pub use presence::{OnlineStatus, Presence, PresenceState};
 pub use quality::CallQuality;
 pub use video::{Frame, VideoConfig, VideoDevice, VideoFrames, VideoSource};
 
@@ -118,6 +118,8 @@ pub enum Command {
     AddVideo(CallId),
     /// Watch these numbers' presence (contacts with presence on).
     SetBuddies(Vec<String>),
+    /// Publish ourselves as online, away or busy (RPID).
+    SetOnlineStatus(OnlineStatus),
     /// Use these sound devices (by name); applies without a restart.
     SetAudioDevices(AudioDevices),
     PlaySound(Sound),
@@ -278,6 +280,7 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut local: Option<LocalAccountConfig> = None;
     let mut devices = AudioDevices::default();
     let mut buddies: Vec<String> = Vec::new();
+    let mut online_status = OnlineStatus::Online;
     let mut session = start(&config, &sink);
     let mut suspended = false;
     let mut debug_on = false;
@@ -378,6 +381,9 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                 set_devices(&mut session, &devices);
                 set_buddies(&mut session, &buddies);
                 add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
+                if let Some(s) = &mut session {
+                    s.set_online_status(online_status);
+                }
                 if debug_on && session.is_some() {
                     pj::debug::apply(true);
                 }
@@ -417,10 +423,19 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                     set_devices(&mut session, &devices);
                     set_buddies(&mut session, &buddies);
                     add_accounts(&mut session, account.as_ref(), local.as_ref(), &sink);
+                if let Some(s) = &mut session {
+                    s.set_online_status(online_status);
+                }
                 }
                 suspended = false;
             }
             Command::SetCallOptions(options) => pj::set_options(options),
+            Command::SetOnlineStatus(status) => {
+                online_status = status;
+                if let Some(s) = &mut session {
+                    s.set_online_status(status);
+                }
+            }
             Command::SetRecording(options) => pj::set_recording(options),
             Command::MonitorCalls(on) => {
                 meters_on = on;
@@ -525,6 +540,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         | Command::Resume
         | Command::SetCallOptions(_)
         | Command::SetRecording(_)
+        | Command::SetOnlineStatus(_)
         | Command::SetAudioDevices(_)
         | Command::SetBuddies(_)
         | Command::SetLevels(_)

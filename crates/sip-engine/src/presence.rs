@@ -72,3 +72,14 @@ mod tests {
         assert_eq!(classify(BuddyStatus::Online, Activity::Other, "Ready"), S::Online);
     }
 }
+
+/// What we publish about ourselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnlineStatus {
+    #[default]
+    Online,
+    /// Idle for a while.
+    Away,
+    /// Do not disturb.
+    Busy,
+}
