@@ -36,6 +36,12 @@ const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Credential Manager entries are `<account key>.RusTone`.
 const CREDENTIAL_SERVICE: &str = "RusTone";
 
+/// The notification service, under the same ID as the single-instance lock.
+fn notifier() -> Option<fastframe_notifications::Client> {
+    let app = fastframe_notifications::App::new("dev.itsyourap.rustone", "RusTone").logo(&crate::icons::logo_png(256), crate::icons::LOGO_BLUE);
+    fastframe_notifications::Client::new(app).map_err(|e| log::warn!("notifications unavailable: {e}")).ok()
+}
+
 /// Moves passwords stored under the app's old name ("RusTone").
 fn move_old_passwords(store: &Keyring, settings: &Settings) {
     let old = store.with_service("RusTone");
@@ -52,6 +58,8 @@ fn move_old_passwords(store: &Keyring, settings: &Settings) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Show,
+    /// A missed-call notification was clicked.
+    ShowCalls,
 }
 
 pub type Requests = Arc<Mutex<Vec<Request>>>;
@@ -63,11 +71,19 @@ pub struct App {
     last_save: Instant,
     files: fastframe_file::Writer,
     pub tray: Option<Tray>,
-    /// The status the tray currently shows.
-    tray_status: Option<Status>,
+    /// The status (and missed calls) the tray currently shows.
+    tray_status: Option<(Status, bool)>,
     requests: Requests,
     pub sip: Sip,
     pub phonebook: crate::phonebook::Phonebook,
+    /// Missed calls since the Calls page was last open.
+    pub missed: u32,
+    notifier: Option<fastframe_notifications::Client>,
+    /// The latest missed-call toast, replaced by the next.
+    missed_toast: Option<fastframe_notifications::Handle>,
+    waker: Waker,
+    /// The missed-call count on the window's taskbar button.
+    taskbar: fastframe_dock::Taskbar,
     secrets: Box<dyn SecretStore>,
     power: fastframe_power::Power,
     net: NetWatch,
@@ -137,6 +153,11 @@ impl App {
             requests,
             sip,
             phonebook: crate::phonebook::Phonebook::open(&paths.database),
+            missed: 0,
+            notifier: notifier(),
+            missed_toast: None,
+            waker: waker.clone(),
+            taskbar: fastframe_dock::Taskbar::default(),
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
@@ -194,6 +215,36 @@ impl App {
 
     pub fn status(&self) -> Status {
         self.sip.status(&self.settings)
+    }
+
+    /// Counts a missed call and shows a notification for it, replacing the
+    /// previous one; clicking it opens the Calls page.
+    fn missed_call(&mut self, who: &str) {
+        self.missed += 1;
+        let Some(client) = &self.notifier else { return };
+        let body = if self.missed > 1 { format!("{who} (and {} more)", self.missed - 1) } else { who.to_owned() };
+        let toast = fastframe_notifications::Notification::new("Missed call").body(body).key("missed-call");
+        let (requests, waker) = (self.requests.clone(), self.waker.clone());
+        match client.show_with(toast, move |event| {
+            if event == fastframe_notifications::Event::Activated {
+                requests.lock().unwrap_or_else(|e| e.into_inner()).push(Request::ShowCalls);
+                waker.wake();
+            }
+        }) {
+            Ok(handle) => self.missed_toast = Some(handle),
+            Err(e) => log::warn!("cannot show the missed-call notification: {e}"),
+        }
+    }
+
+    /// The Calls page is open: missed calls have been seen.
+    pub fn missed_seen(&mut self) {
+        if self.missed > 0 {
+            self.missed = 0;
+            if let Some(client) = &self.notifier {
+                let _ = client.withdraw("missed-call");
+            }
+            self.missed_toast = None;
+        }
     }
 
     /// Shows `text` briefly at the bottom of the window.
@@ -272,6 +323,15 @@ impl App {
                 .unwrap_or_default();
             for call in &polled.ended {
                 self.phonebook.record(call, &own_hosts);
+                if call.is_missed() {
+                    let record = crate::phonebook::record_for(call, &own_hosts);
+                    let who = match self.phonebook.lookup(&record.number) {
+                        Some(contact) => contact.title(),
+                        None if !record.name.is_empty() => record.name.clone(),
+                        None => record.number.clone(),
+                    };
+                    self.missed_call(&who);
+                }
             }
         }
         if polled.show_window {
@@ -280,11 +340,12 @@ impl App {
             self.show_requested = true;
         }
         let status = self.status();
-        if self.tray_status.as_ref() != Some(&status) {
+        let shown = (status, self.missed > 0);
+        if self.tray_status.as_ref() != Some(&shown) {
             if let Some(tray) = &mut self.tray {
-                tray::show_status(tray, &status, self.settings.active().map(|a| a.title()));
+                tray::show_status(tray, &shown.0, self.settings.active().map(|a| a.title()), shown.1);
             }
-            self.tray_status = Some(status);
+            self.tray_status = Some(shown);
         }
     }
 
@@ -296,7 +357,13 @@ impl App {
         let events = self.tray.as_ref().map(Tray::events).unwrap_or_default();
         for event in events {
             match event {
-                Event::Show | Event::Toggle | Event::Menu(tray::SHOW) => show = true,
+                Event::Show | Event::Toggle | Event::Menu(tray::SHOW) => {
+                    show = true;
+                    // Missed calls open the Calls tab.
+                    if self.missed > 0 {
+                        self.ui.page = crate::ui::Page::Calls;
+                    }
+                }
                 Event::Menu(tray::QUIT) => self.quit(ctx),
                 Event::Menu(tray::DEBUG) => {
                     show = true;
@@ -309,6 +376,11 @@ impl App {
         for request in requests {
             match request {
                 Request::Show => show = true,
+                Request::ShowCalls => {
+                    show = true;
+                    self.ui.page = crate::ui::Page::Calls;
+                    self.ui.adding_call = false;
+                }
             }
         }
         if show {
@@ -331,6 +403,14 @@ impl App {
     /// (minimised or occluded windows).
     pub fn logic(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         self.poll(Some(ctx));
+        let label = match self.missed {
+            0 => String::new(),
+            1 => "1 missed call".to_owned(),
+            n => format!("{n} missed calls"),
+        };
+        if let Some(retry) = self.taskbar.show(frame, self.missed, &label) {
+            ctx.request_repaint_after(retry.saturating_duration_since(Instant::now()));
+        }
 
         // Decide here, not in `ui`: closing a minimised window from the
         // taskbar must hide it too.
@@ -421,6 +501,7 @@ impl Resident for App {
     }
 
     fn window_gone(&mut self) {
+        self.taskbar = fastframe_dock::Taskbar::default();
         // The debug window is a child of the main window.
         crate::ui::debug::set_open(self, false);
         self.next = Closed::Quit;

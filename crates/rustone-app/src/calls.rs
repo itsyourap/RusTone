@@ -164,6 +164,12 @@ impl EndedCall {
             (Direction::Incoming, false) => CallKind::Missed,
         }
     }
+
+    /// Whether it counts as a missed call for the badge: an incoming call
+    /// that wasn't answered and that the user didn't decline.
+    pub fn is_missed(&self) -> bool {
+        self.info.direction == Direction::Incoming && !self.answered && self.info.status_code != 486
+    }
 }
 
 #[derive(Debug, Default)]
@@ -603,12 +609,12 @@ mod tests {
         };
         b.on_event(&Event::IncomingCall(info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>")), &cfg);
         let missed = ended(&mut b, 1, 487);
-        assert_eq!((missed.len(), missed[0].kind()), (1, CallKind::Missed));
+        assert_eq!((missed.len(), missed[0].kind(), missed[0].is_missed()), (1, CallKind::Missed, true));
         assert_eq!(missed[0].reason, "Missed call");
 
         b.on_event(&Event::IncomingCall(info(2, Direction::Incoming, CallState::Incoming, "<sip:200@pbx>")), &cfg);
         let declined = ended(&mut b, 2, 486);
-        assert_eq!((declined[0].kind(), declined[0].reason.as_str()), (CallKind::Missed, "Declined"));
+        assert_eq!((declined[0].kind(), declined[0].is_missed(), declined[0].reason.as_str()), (CallKind::Missed, false, "Declined"));
 
         // A refused duplicate leaves no trace.
         b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &cfg);

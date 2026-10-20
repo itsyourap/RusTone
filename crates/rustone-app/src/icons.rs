@@ -97,6 +97,43 @@ pub fn logo_rgba_offline(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// The logo with a red dot in its top-right corner, for the tray after
+/// missed calls.
+pub fn logo_rgba_missed(size: usize) -> Vec<u8> {
+    let mut rgba = logo_rgba(size);
+    let radius = size as f32 * 0.22;
+    let (cx, cy) = (size as f32 - radius, radius);
+    for y in 0..size {
+        for x in 0..size {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            // White ring, then the red dot, edges softened by a pixel.
+            let (color, edge): ([u8; 3], f32) = if d <= radius - 1.0 { ([0xe5, 0x39, 0x35], radius - 1.0) } else { ([0xff, 0xff, 0xff], radius + 0.5) };
+            let coverage = (edge + 0.5 - d).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                let px = &mut rgba[(y * size + x) * 4..][..4];
+                for (c, new) in px[..3].iter_mut().zip(color) {
+                    *c = (f32::from(*c) * (1.0 - coverage) + f32::from(new) * coverage) as u8;
+                }
+                px[3] = px[3].max((coverage * 255.0) as u8);
+            }
+        }
+    }
+    rgba
+}
+
+/// The logo as a PNG, for notifications.
+pub fn logo_png(size: usize) -> Vec<u8> {
+    let side = u32::try_from(size.max(1)).unwrap_or(256);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(side, side).expect("non-zero size");
+    let tree = resvg::usvg::Tree::from_data(LOGO_SVG, &resvg::usvg::Options::default()).expect("logo SVG is valid");
+    let scale = side as f32 / tree.size().width();
+    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    pixmap.encode_png().unwrap_or_default()
+}
+
+/// The logo tile's blue, for the notification icon's background.
+pub const LOGO_BLUE: [u8; 3] = [0x3b, 0x5b, 0xdb];
+
 /// The window and taskbar icon.
 pub fn window_icon() -> egui::IconData {
     const SIZE: usize = 64;
@@ -116,5 +153,9 @@ mod tests {
             let mid = (size / 2 * size + size / 2) * 4;
             assert_eq!(rgba[mid + 3], 255);
         }
+        let missed = logo_rgba_missed(32);
+        let dot = (6 * 32 + 25) * 4;
+        assert!(missed[dot] > 0xc0 && missed[dot + 1] < 0x80, "red dot top right");
+        assert!(logo_png(64).starts_with(&[0x89, b'P', b'N', b'G']), "a PNG");
     }
 }

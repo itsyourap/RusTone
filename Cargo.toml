@@ -31,6 +31,8 @@ fastframe-log = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
 fastframe-dirs = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
 fastframe-file = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
 fastframe-power = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-notifications = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
+fastframe-dock = { git = "https://github.com/crmne/fastframe", tag = "v0.10.0" }
 
 [profile.release]
 debug = "line-tables-only"
