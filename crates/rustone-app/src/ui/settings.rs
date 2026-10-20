@@ -300,6 +300,19 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     app.mark_settings_dirty();
                 }
             });
+            ui.separator();
+            let mut links = *app.ui.links_handled.get_or_insert_with(crate::urlhandler::registered);
+            setting_row(ui, p, "Open sip:, tel: and callto: links", Some("Calls start in RusTone from browsers and other apps"), |ui| {
+                if widgets::toggle(ui, p, &mut links, "Open sip:, tel: and callto: links").changed() {
+                    match crate::urlhandler::set(links) {
+                        Ok(()) => app.ui.links_handled = Some(crate::urlhandler::registered()),
+                        Err(e) => app.notify(format!("Couldn't change the link handler: {e}")),
+                    }
+                }
+            });
+            if links && ui.link(egui::RichText::new("Another app still opens them? Choose RusTone in Windows' Default apps").size(12.0)).clicked() {
+                let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
+            }
         });
 
         ui.add_space(12.0);

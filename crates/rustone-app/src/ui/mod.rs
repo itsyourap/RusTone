@@ -46,6 +46,8 @@ pub enum Page {
 #[derive(Debug, Default)]
 pub struct UiState {
     pub page: Page,
+    /// Whether links open RusTone, read from the registry when Settings opens.
+    pub links_handled: Option<bool>,
     pub dialer: dialer::DialerState,
     pub account_draft: Option<accounts::Draft>,
     /// Showing the dialer during a call ("Add call").

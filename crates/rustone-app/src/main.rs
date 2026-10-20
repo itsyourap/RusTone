@@ -14,6 +14,7 @@ mod phonebook;
 mod sip;
 mod theme;
 mod tray;
+mod urlhandler;
 mod ui;
 mod window;
 
