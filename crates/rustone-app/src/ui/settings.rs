@@ -301,6 +301,8 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                 }
             });
             ui.separator();
+            start_with_windows(ui, app, p);
+            ui.separator();
             let mut links = *app.ui.links_handled.get_or_insert_with(crate::urlhandler::registered);
             setting_row(ui, p, "Open sip:, tel: and callto: links", Some("Calls start in RusTone from browsers and other apps"), |ui| {
                 if widgets::toggle(ui, p, &mut links, "Open sip:, tel: and callto: links").changed() {
@@ -342,6 +344,33 @@ fn auto_answer_when_label(when: AutoAnswerWhen) -> &'static str {
         AutoAnswerWhen::OthersOnHold => "Answer if the others are on hold",
         AutoAnswerWhen::Always => "Answer anyway",
     }
+}
+
+/// "Start with Windows": off, with the window, or in the tray.
+fn start_with_windows(ui: &mut Ui, app: &mut App, p: &Palette) {
+    use fastframe_autostart::{Start, State};
+    let state = app.start_at_login.state();
+    if state == Some(State::Unsupported) {
+        return;
+    }
+    let label = |start: Option<Start>| match start {
+        None => "Off",
+        Some(Start::Window) => "With the window",
+        Some(Start::Hidden) => "In the tray",
+    };
+    setting_stack(ui, p, "Start with Windows", Some("When you sign in"), |ui| {
+        let current = state.and_then(State::start);
+        let text = if state.is_none() { "Checking…" } else { label(current) };
+        ui.add_enabled_ui(state.is_some(), |ui| {
+            egui::ComboBox::from_id_salt("start-with-windows").width(ui.available_width()).selected_text(text).show_ui(ui, |ui| {
+                for start in [None, Some(Start::Window), Some(Start::Hidden)] {
+                    if ui.selectable_label(current == start, label(start)).clicked() && current != start {
+                        app.start_at_login.set(start);
+                    }
+                }
+            });
+        });
+    });
 }
 
 fn deny_label(mode: DenyIncoming) -> &'static str {

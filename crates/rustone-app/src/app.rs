@@ -97,6 +97,8 @@ pub struct App {
     power: fastframe_power::Power,
     net: NetWatch,
     idle: IdleWatch,
+    /// Starting with Windows.
+    pub start_at_login: crate::autostart::StartAtLogin,
     rendering: fastframe_text::TextRendering,
 
     /// What happens when the window goes away.
@@ -176,6 +178,12 @@ impl App {
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
             net: NetWatch::spawn(move || net_wake.wake()),
+            start_at_login: {
+                let wake = waker.clone();
+                let start = crate::autostart::StartAtLogin::new(move || wake.wake());
+                start.refresh();
+                start
+            },
             idle: IdleWatch::spawn({
                 let wake = waker.clone();
                 move || wake.wake()
