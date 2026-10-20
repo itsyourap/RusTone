@@ -23,8 +23,9 @@ pub struct Buddies {
 }
 
 impl Buddies {
-    /// Subscribes `wanted` (number → URI) and drops buddies no longer wanted.
-    pub fn sync(&mut self, wanted: &[(String, String)], arena: &mut super::util::Arena) {
+    /// Subscribes `wanted` (number → URI) from account `acc` and drops
+    /// buddies no longer wanted.
+    pub fn sync(&mut self, wanted: &[(String, String)], acc: pjsua_acc_id, arena: &mut super::util::Arena) {
         let mut groups: HashMap<&str, Vec<String>> = HashMap::new();
         for (number, uri) in wanted {
             groups.entry(uri.as_str()).or_default().push(number.clone());
@@ -48,6 +49,9 @@ impl Buddies {
             pj_default!(cfg: pjsua_buddy_config = pjsua_buddy_config_default);
             cfg.uri = arena.pj(uri);
             cfg.subscribe = PJ_TRUE;
+            // Pinned to the main account: left to pjsua, the local account
+            // can win and its transport can't reach the server.
+            cfg.acc_id = acc;
             let mut id = PJSUA_INVALID_ID;
             // Registered before adding: the first NOTIFY can come at once.
             // SAFETY: `cfg` initialised in place; the URI lives in the arena.

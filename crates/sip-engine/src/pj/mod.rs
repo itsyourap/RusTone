@@ -452,7 +452,7 @@ impl Session {
                 Some((number.clone(), uri))
             })
             .collect();
-        self.buddies.sync(&wanted, &mut self.arena);
+        self.buddies.sync(&wanted, self.account, &mut self.arena);
     }
 
     // -----------------------------------------------------------------------
