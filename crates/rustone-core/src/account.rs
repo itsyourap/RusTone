@@ -95,6 +95,13 @@ impl Default for Account {
 }
 
 impl Account {
+    /// The account's own number: the username without `sip:` or `@host`.
+    pub fn number(&self) -> &str {
+        let user = self.username.trim();
+        let user = user.strip_prefix("sip:").unwrap_or(user);
+        user.split('@').next().unwrap_or(user)
+    }
+
     /// The name to show: label, else display name, else username, else server.
     pub fn title(&self) -> &str {
         [&self.label, &self.display_name, &self.username, &self.server]
@@ -131,6 +138,13 @@ pub struct LocalAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn number_is_the_user_part() {
+        let a = Account { username: "+910000000000@sip.example.com".into(), ..Account::default() };
+        assert_eq!(a.number(), "+910000000000");
+        assert_eq!(Account { username: " sip:1001 ".into(), ..Account::default() }.number(), "1001");
+    }
 
     #[test]
     fn title_falls_back() {

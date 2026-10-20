@@ -147,8 +147,8 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (logo, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
         Icon::Phone.image(p.accent, 18.0).paint_at(ui, logo);
         ui.label(egui::RichText::new("RusTone").font(Weight::SemiBold.font_id(16.0)).color(p.text));
-        let account = app.settings.active().map(|a| a.title().to_owned());
-        status_chip(ui, p, &app.status(), account.as_deref());
+        let account = app.settings.active().map(|a| (a.title().to_owned(), a.number().to_owned()));
+        status_chip(ui, p, &app.status(), account.as_ref().map(|(title, number)| (title.as_str(), number.as_str())));
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
@@ -169,8 +169,9 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
-/// Registration status as a small pill; details on hover.
-fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&str>) {
+/// Registration status as a small pill; the account, its number and any
+/// error on hover. `account` is (name, number).
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<(&str, &str)>) {
     let (dot, text) = match status {
         Status::Online | Status::Ready => (p.success, p.secondary),
         Status::Starting | Status::Connecting => (p.warning, p.secondary),
@@ -196,13 +197,7 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&str>)
     if show_text {
         painter.galley(egui::pos2(rect.left() + 19.0, rect.center().y - galley.size().y / 2.0), galley, text);
     }
-    let hover = match (status, account) {
-        (Status::Error(e), Some(a)) => format!("{a}\n{e}"),
-        (Status::Error(e), None) => e.clone(),
-        (Status::NoAccount, _) => "Add an account in Settings".to_owned(),
-        (s, Some(a)) => format!("{a}: {}", s.label()),
-        (s, None) => s.label().to_owned(),
-    };
+    let hover = status_hover(status, account);
     response.on_hover_text(hover);
 }
 
@@ -214,6 +209,24 @@ fn missed_badge(ui: &Ui, p: &Palette, center: egui::Pos2, count: u32) {
     let rect = egui::Rect::from_min_size(egui::pos2(center.x - 8.5, center.y - 8.5), size);
     ui.painter().rect(rect, egui::CornerRadius::same(9), p.danger, egui::Stroke::new(2.0, p.panel), egui::StrokeKind::Outside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
+}
+
+/// The status pill's hover text: account name and its number, then the
+/// status (or the error).
+fn status_hover(status: &Status, account: Option<(&str, &str)>) -> String {
+    match (status, account) {
+        (Status::NoAccount, _) => "Add an account in Settings".to_owned(),
+        (status, Some((name, number))) => {
+            // The number only when the name doesn't already show it.
+            let who = if number.is_empty() || name.contains(number) { name.to_owned() } else { format!("{name} · {number}") };
+            match status {
+                Status::Error(e) => format!("{who}\n{e}"),
+                s => format!("{who}\n{}", s.label()),
+            }
+        }
+        (Status::Error(e), None) => e.clone(),
+        (s, None) => s.label().to_owned(),
+    }
 }
 
 fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
@@ -254,5 +267,18 @@ fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
             Weight::Medium.font_id(11.0),
             tint,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_hover_names_the_account_and_its_number() {
+        assert_eq!(status_hover(&Status::Online, Some(("Home", "+910000000000"))), "Home · +910000000000\nOnline");
+        assert_eq!(status_hover(&Status::Error("403 Forbidden".into()), Some(("Home", "1001"))), "Home · 1001\n403 Forbidden");
+        assert_eq!(status_hover(&Status::Online, Some(("1001", "1001"))), "1001\nOnline", "no repeat when the name is the number");
+        assert_eq!(status_hover(&Status::NoAccount, None), "Add an account in Settings");
     }
 }
