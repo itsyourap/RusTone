@@ -1,0 +1,23 @@
+# Puts the MSVC x64 toolchain (cl, link, msbuild) on the job's PATH and
+# environment, like a "Developer PowerShell". Replaces ilammy/msvc-dev-cmd,
+# which still runs on Node.js 20.
+name: MSVC environment
+description: Exports the Visual Studio developer environment for x64.
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: |
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { throw "Visual Studio with the C++ x64 tools not found" }
+        $before = @{}
+        Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+        $lines = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=amd64 -host_arch=amd64 -no_logo && set"
+        if ($LASTEXITCODE) { throw "VsDevCmd.bat failed" }
+        foreach ($line in $lines) {
+          if ($line -match '^([^=]+)=(.*)$' -and $before[$Matches[1]] -ne $Matches[2]) {
+            "$($Matches[1])=$($Matches[2])" >> $env:GITHUB_ENV
+          }
+        }
+        Write-Host "MSVC from $vs"

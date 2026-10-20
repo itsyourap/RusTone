@@ -1,0 +1,399 @@
+# Builds pjproject (from the fork) and its dependencies, then tests RusTone,
+# then builds the debug and release binaries.
+#
+# Stages, each a matrix over the platforms listed in the `platforms` job
+# (only Windows for now; Linux and macOS come later):
+#   sdl2, openssl, openh264, amr  (in parallel, each cached)
+#     -> pjproject                (cached per fork commit)
+#       -> test
+#         -> build (debug, release)
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write  # lets a failed dependency cancel the run
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PJPROJECT_REPO: itsyourap/pjproject
+  PJPROJECT_REF: rustone-2.17
+  SDL2_VERSION: 2.32.10
+  OPENH264_VERSION: 2.6.0
+  # Bump to rebuild OpenSSL (vcpkg's current 3.x).
+  OPENSSL_CACHE: v1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  platforms:
+    name: platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - id: list
+        # name: artifact/cache suffix; os: runner image.
+        run: |
+          echo 'list=[{"name": "windows-x64", "os": "windows-2025"}]' >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------- deps --
+
+  sdl2:
+    name: SDL2 (${{ matrix.platform.name }})
+    needs: platforms
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _dep
+          key: dep-${{ matrix.platform.name }}-sdl2-${{ env.SDL2_VERSION }}
+      - name: Download (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin, _build | Out-Null
+          curl.exe -fsSL --retry 3 -o _build/sdl2.zip "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          Expand-Archive _build/sdl2.zip _build
+          $sdl = "_build/SDL2-$env:SDL2_VERSION"
+          Copy-Item "$sdl/include/*" _dep/include
+          Copy-Item "$sdl/lib/x64/*.lib" _dep/lib
+          Copy-Item "$sdl/lib/x64/SDL2.dll" _dep/bin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dep-${{ matrix.platform.name }}-sdl2
+          path: _dep
+          retention-days: 1
+      # The dependencies run side by side; one failing stops the others.
+      - name: Stop the run
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
+
+  openssl:
+    name: OpenSSL (${{ matrix.platform.name }})
+    needs: platforms
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _dep
+          key: dep-${{ matrix.platform.name }}-openssl-${{ env.OPENSSL_CACHE }}
+      - name: Build with vcpkg (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows-release
+          if ($LASTEXITCODE) { throw "vcpkg failed" }
+          $ssl = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-release"
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin | Out-Null
+          Copy-Item -Recurse "$ssl/include/openssl" _dep/include
+          Copy-Item "$ssl/lib/libcrypto.lib", "$ssl/lib/libssl.lib" _dep/lib
+          Copy-Item "$ssl/bin/libcrypto-3-x64.dll", "$ssl/bin/libssl-3-x64.dll" _dep/bin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dep-${{ matrix.platform.name }}-openssl
+          path: _dep
+          retention-days: 1
+      # The dependencies run side by side; one failing stops the others.
+      - name: Stop the run
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
+
+  openh264:
+    name: OpenH264 (${{ matrix.platform.name }})
+    needs: platforms
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _dep
+          key: dep-${{ matrix.platform.name }}-openh264-${{ env.OPENH264_VERSION }}
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: ./.github/actions/msvc
+      - name: Set up NASM (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          if ($LASTEXITCODE) { throw "choco install nasm failed" }
+          "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
+      - name: Build with meson
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          pip install meson ninja
+          git clone --depth 1 --branch "v$env:OPENH264_VERSION" https://github.com/cisco/openh264 _build/openh264
+          $extra = @()
+          if ($IsWindows) { $extra += "-Db_vscrt=mt" }
+          meson setup _build/openh264-build _build/openh264 "--prefix=$PWD/_dep" --libdir=lib --buildtype=release `
+            -Ddefault_library=static -Dtests=disabled @extra
+          if ($LASTEXITCODE) { throw "meson setup failed" }
+          meson install -C _build/openh264-build
+          if ($LASTEXITCODE) { throw "meson install failed" }
+          # pjproject links "openh264.lib"; meson names static libraries lib*.a.
+          if ($IsWindows) { Move-Item -Force _dep/lib/libopenh264.a _dep/lib/openh264.lib }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dep-${{ matrix.platform.name }}-openh264
+          path: _dep
+          retention-days: 1
+      # The dependencies run side by side; one failing stops the others.
+      - name: Stop the run
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
+
+  amr:
+    name: ${{ matrix.package.name }} (${{ matrix.platform.name }})
+    needs: platforms
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        package:
+          - { name: opencore-amr, version: 0.1.6 }
+          - { name: vo-amrwbenc, version: 0.1.3 }
+    runs-on: ${{ matrix.platform.os }}
+    env:
+      PKG_NAME: ${{ matrix.package.name }}
+      PKG_VERSION: ${{ matrix.package.version }}
+    steps:
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _dep
+          key: dep-${{ matrix.platform.name }}-${{ env.PKG_NAME }}-${{ env.PKG_VERSION }}
+      # pjproject's MSVC build links the GCC-built static libraries
+      # (PJMEDIA_OPENCORE_AMR_BUILT_WITH_GCC); UCRT64 matches MSVC's CRT.
+      - name: Set up MSYS2 (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make curl tar
+          pacboy: gcc:p
+      - name: Build (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -e
+          prefix=$(cygpath -u "$GITHUB_WORKSPACE/_dep")
+          mkdir -p _build && cd _build
+          src="$PKG_NAME-$PKG_VERSION"
+          curl -fsSL --retry 3 -o "$src.tar.gz" "https://downloads.sourceforge.net/project/opencore-amr/$PKG_NAME/$src.tar.gz"
+          tar xzf "$src.tar.gz"
+          cd "$src"
+          ./configure --prefix="$prefix" --enable-static --disable-shared
+          make -j4
+          make install
+          # GCC calls ___chkstk_ms for large stack frames; MSVC's linker can't
+          # find it, so add libgcc's object to the archive that needs it
+          # (https://docs.pjsip.org/en/latest/specific-guides/audio/opencore-amr.html#windows).
+          ar x "$(gcc -print-libgcc-file-name)" _chkstk_ms.o
+          for lib in "$prefix"/lib/*.a; do
+            if nm "$lib" 2>/dev/null | grep -q "U ___chkstk_ms"; then
+              echo "adding _chkstk_ms.o to $(basename "$lib")"
+              ar q "$lib" _chkstk_ms.o
+            fi
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dep-${{ matrix.platform.name }}-${{ env.PKG_NAME }}
+          path: _dep
+          retention-days: 1
+      # The dependencies run side by side; one failing stops the others.
+      - name: Stop the run
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
+
+  # ----------------------------------------------------------- pjproject --
+
+  pjproject:
+    name: pjproject (${{ matrix.platform.name }})
+    needs: [platforms, sdl2, openssl, openh264, amr]
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+    runs-on: ${{ matrix.platform.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dep-${{ matrix.platform.name }}-*
+          path: _sdk/deps
+          merge-multiple: true
+
+      - name: Resolve the pjproject commit
+        id: pj
+        run: |
+          $sha = (git ls-remote "https://github.com/$env:PJPROJECT_REPO" "refs/heads/$env:PJPROJECT_REF").Split()[0]
+          if (-not $sha) { throw "branch $env:PJPROJECT_REF not found" }
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _sdk/pjproject
+          # The fork's commit, our config_site.h and the dependencies built above.
+          key: pjproject-${{ matrix.platform.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '_sdk/deps/**') }}
+
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: ./.github/actions/msvc
+
+      - name: Fetch the fork
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch $env:PJPROJECT_REF "https://github.com/$env:PJPROJECT_REPO" _build/pjproject
+          git -C _build/pjproject checkout ${{ steps.pj.outputs.sha }}
+          Copy-Item crates/pjsua-sys/config_site.h _build/pjproject/pjlib/include/pj/config_site.h
+
+      - name: Build (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          $deps = "$env:GITHUB_WORKSPACE\_sdk\deps"
+          @"
+          <Project>
+            <ItemDefinitionGroup>
+              <ClCompile><AdditionalIncludeDirectories>$deps\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+              <Link><AdditionalLibraryDirectories>$deps\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories></Link>
+            </ItemDefinitionGroup>
+          </Project>
+          "@ | Set-Content _build/pjproject/Directory.Build.props
+          msbuild _build/pjproject/pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /m /v:minimal
+          if ($LASTEXITCODE) { throw "msbuild failed" }
+
+      - name: Stage headers and libraries
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          $src = "_build/pjproject"
+          $dst = "_sdk/pjproject"
+          foreach ($m in "pjlib", "pjlib-util", "pjnath", "pjmedia", "pjsip") {
+            New-Item -ItemType Directory -Force "$dst/$m" | Out-Null
+            Copy-Item -Recurse "$src/$m/include" "$dst/$m/include"
+          }
+          New-Item -ItemType Directory -Force "$dst/lib", "$dst/third_party/lib" | Out-Null
+          $ext = if ($IsWindows) { "lib" } else { "a" }
+          Copy-Item "$src/lib/*.$ext" "$dst/lib"
+          Copy-Item "$src/third_party/lib/*.$ext" "$dst/third_party/lib"
+
+      - name: SDK size
+        run: |
+          Get-ChildItem -Recurse _sdk -File | Measure-Object -Sum Length | ForEach-Object { "SDK: $($_.Count) files, $([math]::Round($_.Sum / 1MB)) MB" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdk-${{ matrix.platform.name }}
+          path: _sdk
+          retention-days: 1
+
+  # ----------------------------------------------------------------- app --
+
+  test:
+    name: test (${{ matrix.platform.name }})
+    needs: [platforms, pjproject]
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+    runs-on: ${{ matrix.platform.os }}
+    env:
+      PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
+      RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdk-${{ matrix.platform.name }}
+          path: _sdk
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.name }}-test
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  build:
+    name: build (${{ matrix.platform.name }}, ${{ matrix.profile }})
+    needs: [platforms, test]
+    strategy:
+      fail-fast: true
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        profile: [debug, release]
+    runs-on: ${{ matrix.platform.os }}
+    env:
+      PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
+      RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
+      DIST: dist/rustone-${{ matrix.platform.name }}-${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdk-${{ matrix.platform.name }}
+          path: _sdk
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.name }}-${{ matrix.profile }}
+      - name: Build
+        shell: pwsh
+        run: |
+          $flags = @("--workspace", "--locked")
+          if ("${{ matrix.profile }}" -eq "release") { $flags += "--release" }
+          cargo build @flags
+          if ($LASTEXITCODE) { throw "cargo build failed" }
+      - name: Collect binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.profile }}"
+          New-Item -ItemType Directory -Force $env:DIST | Out-Null
+          Copy-Item "$bin/rustone.exe", "$bin/rustone-cli.exe", "$bin/rustone.pdb", "$bin/rustone_cli.pdb", "$bin/*.dll" $env:DIST
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rustone-${{ matrix.platform.name }}-${{ matrix.profile }}
+          path: ${{ env.DIST }}
