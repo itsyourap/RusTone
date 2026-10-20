@@ -147,6 +147,8 @@ pub struct CallSettings {
     /// Dialled before a ringing contact's number to pick up its call;
     /// empty turns pickup off.
     pub pickup_code: String,
+    /// Turn text messages off: incoming ones are dropped.
+    pub disable_messaging: bool,
 }
 
 impl Default for CallSettings {
@@ -159,6 +161,7 @@ impl Default for CallSettings {
             bring_to_front: true,
             no_ignore: false,
             pickup_code: "**".into(),
+            disable_messaging: false,
         }
     }
 }

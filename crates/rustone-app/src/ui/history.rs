@@ -142,7 +142,7 @@ fn title(r: &CallRecord, contact: Option<&Contact>) -> String {
 }
 
 /// "14:05" today, "Yesterday 14:05", "12 Oct, 14:05" this year, else "12 Oct 2025".
-fn when(time: i64, now: &jiff::Zoned) -> String {
+pub(super) fn when(time: i64, now: &jiff::Zoned) -> String {
     let Ok(ts) = jiff::Timestamp::from_second(time) else { return String::new() };
     let t = ts.to_zoned(now.time_zone().clone());
     let days = (now.date() - t.date()).get_days();
@@ -221,6 +221,10 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, r: &CallRecord, contact:
                         app.ui.page = Page::Contact;
                     }
                 }
+            }
+            if !app.settings.calls.disable_messaging && ui.button("Message").clicked() {
+                app.ui.messages.open(&r.number);
+                app.ui.page = Page::Messages;
             }
             if ui.button("Copy number").clicked() {
                 ui.ctx().copy_text(r.number.clone());

@@ -4,6 +4,7 @@ mod accounts;
 mod call;
 mod contacts;
 mod history;
+mod messages;
 pub mod debug;
 mod dialer;
 mod settings;
@@ -50,6 +51,7 @@ pub struct UiState {
     pub call_panel: call::CallPanel,
     pub contacts: contacts::ContactsView,
     pub history: history::HistoryView,
+    pub messages: messages::MessagesView,
     pub contact_draft: Option<contacts::Draft>,
 }
 
@@ -92,7 +94,7 @@ pub fn draw(ui: &mut Ui, app: &mut App) {
                     history::show(ui, app, &p);
                 }
                 Page::Contacts => contacts::show(ui, app, &p),
-                Page::Messages => widgets::empty_state(ui, &p, Icon::Message, "No messages", "SIP messages appear here."),
+                Page::Messages => messages::show(ui, app, &p),
                 Page::Settings => settings::show(ui, app, &p),
                 Page::Account => accounts::editor(ui, app, &p),
                 Page::Contact => contacts::editor(ui, app, &p),
@@ -127,8 +129,7 @@ fn dial(app: &mut App, target: &str) {
     if target.is_empty() {
         return;
     }
-    let looks_like_ip = target.split([':', '@']).any(|part| part.parse::<std::net::IpAddr>().is_ok());
-    let local = app.settings.local_account.enabled && (looks_like_ip || !app.status().is_online());
+    let local = app.use_local_account(target);
     app.act(|c| c.dial(target, local));
     app.ui.adding_call = false;
     app.ui.call_panel = call::CallPanel::None;
@@ -220,13 +221,13 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     copied
 }
 
-/// The missed-call count on the Calls tab.
-fn missed_badge(ui: &Ui, p: &Palette, center: egui::Pos2, count: u32) {
+/// A count on a tab: missed calls (red), unread messages (accent).
+fn count_badge(ui: &Ui, p: &Palette, center: egui::Pos2, count: u32, fill: egui::Color32) {
     let text = if count > 99 { "99+".to_owned() } else { count.to_string() };
     let galley = ui.painter().layout_no_wrap(text, Weight::SemiBold.font_id(10.5), p.on_accent);
     let size = vec2((galley.size().x + 8.0).max(17.0), 17.0);
     let rect = egui::Rect::from_min_size(egui::pos2(center.x - 8.5, center.y - 8.5), size);
-    ui.painter().rect(rect, egui::CornerRadius::same(9), p.danger, egui::Stroke::new(2.0, p.panel), egui::StrokeKind::Outside);
+    ui.painter().rect(rect, egui::CornerRadius::same(9), fill, egui::Stroke::new(2.0, p.panel), egui::StrokeKind::Outside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
 }
 
@@ -280,8 +281,13 @@ fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
             ui.painter().rect_filled(pill, egui::CornerRadius::same(14), p.accent.gamma_multiply(0.16 * pill_t));
         }
         Icon::image(icon, tint, 20.0).paint_at(ui, egui::Rect::from_center_size(icon_center, Vec2::splat(20.0)));
-        if page == Page::Calls && app.missed > 0 {
-            missed_badge(ui, p, icon_center + vec2(12.0, -9.0), app.missed);
+        let (count, fill) = match page {
+            Page::Calls => (app.missed, p.danger),
+            Page::Messages => (app.phonebook.unread(), p.accent),
+            _ => (0, p.accent),
+        };
+        if count > 0 {
+            count_badge(ui, p, icon_center + vec2(12.0, -9.0), count, fill);
         }
         ui.painter().text(
             egui::pos2(rect.center().x, rect.top() + 46.0),

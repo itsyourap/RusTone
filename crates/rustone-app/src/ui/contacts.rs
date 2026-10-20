@@ -294,6 +294,10 @@ fn row_actions(ui: &mut Ui, app: &mut App, p: &Palette, c: &Contact, pickup: Opt
                 action = Some(RowAction::Call(number));
             }
         }
+        if !app.settings.calls.disable_messaging && ui.button("Message").clicked() {
+            app.ui.messages.open(c.number.trim());
+            app.ui.page = Page::Messages;
+        }
         if ui.button("Copy number").clicked() {
             ui.ctx().copy_text(c.number.trim().to_owned());
             app.notify(format!("Copied {}", c.number.trim()));

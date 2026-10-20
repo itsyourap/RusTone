@@ -249,6 +249,53 @@ impl App {
         }
     }
 
+    /// The active account's registrar, domain and proxies: numbers there are
+    /// shown without the host.
+    fn own_hosts(&self) -> Vec<String> {
+        self.settings
+            .active()
+            .map(|a| [a.server.trim().to_owned(), a.domain.trim().to_owned()].into_iter().chain(a.proxies()).filter(|h| !h.is_empty()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether to reach `target` through the local account: IP addresses
+    /// when it's on, or anything when there's no usable main account.
+    pub fn use_local_account(&self, target: &str) -> bool {
+        let looks_like_ip = target.split([':', '@']).any(|part| part.parse::<std::net::IpAddr>().is_ok());
+        self.settings.local_account.enabled && (looks_like_ip || !self.status().is_online())
+    }
+
+    /// Sends a text message to `target`, saving it first; its answer
+    /// updates it. Returns the conversation it went into.
+    pub fn send_message(&mut self, target: &str, text: &str) -> String {
+        let peer = crate::phonebook::conversation_key(target);
+        let record = rustone_core::messages::MessageRecord {
+            id: 0,
+            peer: peer.clone(),
+            name: String::new(),
+            outgoing: true,
+            time: jiff::Timestamp::now().as_second(),
+            text: text.to_owned(),
+            state: rustone_core::messages::MessageState::Sending,
+            reason: String::new(),
+            unread: false,
+        };
+        let id = self.phonebook.add_message(&record);
+        self.dispatch_message(id, &peer, text);
+        peer
+    }
+
+    /// Sends a failed message again, in place.
+    pub fn retry_message(&mut self, id: i64, peer: &str, text: &str) {
+        self.phonebook.set_message_state(id, rustone_core::messages::MessageState::Sending, "");
+        self.dispatch_message(id, peer, text);
+    }
+
+    fn dispatch_message(&mut self, id: i64, peer: &str, text: &str) {
+        let local = self.use_local_account(peer);
+        self.sip.send(sip_engine::Command::SendMessage { id: id as u64, target: peer.to_owned(), text: text.to_owned(), local });
+    }
+
     /// The users-directory URL's placeholder values, from the active account.
     fn directory_values(&self) -> rustone_core::directory::UrlValues {
         let mut v = rustone_core::directory::UrlValues {
@@ -342,11 +389,7 @@ impl App {
         }
         let polled = self.sip.poll(&self.settings);
         if !polled.ended.is_empty() {
-            let own_hosts: Vec<String> = self
-                .settings
-                .active()
-                .map(|a| [a.server.trim().to_owned(), a.domain.trim().to_owned()].into_iter().chain(a.proxies()).filter(|h| !h.is_empty()).collect())
-                .unwrap_or_default();
+            let own_hosts = self.own_hosts();
             for call in &polled.ended {
                 self.phonebook.record(call, &own_hosts);
                 if call.is_missed() {
@@ -359,6 +402,34 @@ impl App {
                     self.missed_call(&who);
                 }
             }
+        }
+        let own_hosts = self.own_hosts();
+        for message in polled.messages {
+            if self.settings.calls.disable_messaging {
+                continue;
+            }
+            let (number, name) = crate::phonebook::peer_for(&message.from, &own_hosts);
+            let record = rustone_core::messages::MessageRecord {
+                id: 0,
+                peer: crate::phonebook::conversation_key(&number),
+                name,
+                outgoing: false,
+                time: jiff::Timestamp::now().as_second(),
+                text: message.text,
+                state: rustone_core::messages::MessageState::Received,
+                reason: String::new(),
+                unread: true,
+            };
+            self.phonebook.add_message(&record);
+        }
+        for status in polled.message_statuses {
+            use rustone_core::messages::MessageState;
+            let (state, reason) = match (status.delivered(), status.code) {
+                (true, _) => (MessageState::Sent, String::new()),
+                (false, 0) => (MessageState::Failed, status.reason),
+                (false, code) => (MessageState::Failed, format!("{code} {}", status.reason).trim().to_owned()),
+            };
+            self.phonebook.set_message_state(status.id as i64, state, &reason);
         }
         if polled.show_window {
             self.ui.page = crate::ui::Page::Dialer;

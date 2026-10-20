@@ -40,6 +40,7 @@ fastframe_icons::icons! {
         SpeakerOff => lucide "volume-x",
         Bell => "bell",
         Star => "star",
+        Send => "send-horizontal",
         More => lucide "ellipsis",
         Copy => lucide "copy",
         BellOff => "bell-off",

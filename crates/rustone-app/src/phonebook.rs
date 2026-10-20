@@ -1,4 +1,4 @@
-//! The contacts (and later the call history) in `rustone.db`, cached for the
+//! The contacts, call history and messages in `rustone.db`, cached for the
 //! UI, plus vCard import/export through native file dialogs, which run on a
 //! thread of their own so the window keeps drawing.
 
@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use rustone_core::contacts::Contact;
 use rustone_core::history::{self, CallRecord};
+use rustone_core::messages::{Conversation, MessageRecord, MessageState};
 use sip_engine::uri_user_host;
 
 use crate::calls::{EndedCall, Party};
@@ -27,6 +28,10 @@ pub struct Phonebook {
     pub contacts: Vec<Contact>,
     /// The call history, newest first.
     pub calls: Vec<CallRecord>,
+    /// Message conversations, the most recent first.
+    pub conversations: Vec<Conversation>,
+    /// Changes whenever messages change, so views can reload.
+    pub revision: u64,
     dialog: Option<Receiver<Picked>>,
 }
 
@@ -40,12 +45,13 @@ impl Phonebook {
                 Store::open_in_memory().ok()
             }
         };
-        let mut book = Self { store, contacts: Vec::new(), calls: Vec::new(), dialog: None };
+        let mut book = Self { store, contacts: Vec::new(), calls: Vec::new(), conversations: Vec::new(), revision: 0, dialog: None };
         book.reload();
         book
     }
 
     fn reload(&mut self) {
+        self.reload_messages();
         let Some(store) = &self.store else { return };
         match store.calls() {
             Ok(calls) => self.calls = calls,
@@ -59,6 +65,67 @@ impl Phonebook {
             }
             Err(e) => log::warn!("cannot read contacts: {e}"),
         }
+    }
+
+    fn reload_messages(&mut self) {
+        self.revision += 1;
+        let Some(store) = &self.store else { return };
+        match store.conversations() {
+            Ok(list) => self.conversations = list,
+            Err(e) => log::warn!("cannot read messages: {e}"),
+        }
+    }
+
+    /// One conversation, oldest first.
+    pub fn messages_with(&self, peer: &str) -> Vec<MessageRecord> {
+        let Some(store) = &self.store else { return Vec::new() };
+        store.messages_with(peer).unwrap_or_else(|e| {
+            log::warn!("cannot read the conversation: {e}");
+            Vec::new()
+        })
+    }
+
+    /// Unread messages over all conversations.
+    pub fn unread(&self) -> u32 {
+        self.conversations.iter().map(|c| c.unread).sum()
+    }
+
+    /// Saves a message; returns its id (0 if it couldn't be saved).
+    pub fn add_message(&mut self, message: &MessageRecord) -> i64 {
+        let Some(store) = &self.store else { return 0 };
+        let id = store.add_message(message).unwrap_or_else(|e| {
+            log::warn!("cannot save the message: {e}");
+            0
+        });
+        self.reload_messages();
+        id
+    }
+
+    pub fn set_message_state(&mut self, id: i64, state: MessageState, reason: &str) {
+        let Some(store) = &self.store else { return };
+        if let Err(e) = store.set_message_state(id, state, reason) {
+            log::warn!("cannot update the message: {e}");
+        }
+        self.reload_messages();
+    }
+
+    pub fn mark_read(&mut self, peer: &str) {
+        if !self.conversations.iter().any(|c| c.peer == peer && c.unread > 0) {
+            return;
+        }
+        if let Some(store) = &self.store
+            && let Err(e) = store.mark_read(peer)
+        {
+            log::warn!("cannot mark the conversation read: {e}");
+        }
+        self.reload_messages();
+    }
+
+    pub fn delete_conversation(&mut self, peer: &str) -> Result<(), String> {
+        let store = self.store.as_ref().ok_or("no database")?;
+        store.delete_conversation(peer)?;
+        self.reload_messages();
+        Ok(())
     }
 
     /// The numbers of contacts with presence on, without repeats.
@@ -246,22 +313,46 @@ fn rfc3339(seconds: i64) -> String {
 /// and `user@host` for others, and the SIP display name.
 pub fn record_for(call: &EndedCall, own_hosts: &[String]) -> CallRecord {
     let source = call.info.caller_id.as_deref().unwrap_or(&call.info.remote);
-    let party = Party::parse(source);
-    let user_host = uri_user_host(source);
-    let host_only = |h: &str| h.rsplit_once(':').map_or(h, |(host, _)| host).trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
-    let number = match user_host.split_once('@') {
-        Some((user, host)) if !user.is_empty() && !own_hosts.iter().any(|own| host_only(own) == host_only(host)) => format!("{user}@{host}"),
-        _ => party.user,
-    };
+    let (number, name) = peer_for(source, own_hosts);
     let time = call.started.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     CallRecord {
         id: 0,
         kind: call.kind(),
         number,
-        name: party.name.unwrap_or_default(),
+        name,
         time,
         duration: if call.answered { call.info.connected_for.as_secs() as u32 } else { 0 },
         info: call.reason.clone(),
+    }
+}
+
+/// Who a SIP address is, for the history and messages: the user part for
+/// the account's own hosts, `user@host` for others, and the display name.
+pub fn peer_for(address: &str, own_hosts: &[String]) -> (String, String) {
+    let party = Party::parse(address);
+    let user_host = uri_user_host(address);
+    let host_only = |h: &str| h.rsplit_once(':').map_or(h, |(host, _)| host).trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    let number = match user_host.split_once('@') {
+        Some((user, host)) if !user.is_empty() && !own_hosts.iter().any(|own| host_only(own) == host_only(host)) => format!("{user}@{host}"),
+        _ => party.user,
+    };
+    (number, party.name.unwrap_or_default())
+}
+
+/// The key a conversation is stored under: no `sip:` or brackets, and no
+/// formatting characters in the user part, so "98765 43210" typed and
+/// "9876543210" received meet in one conversation.
+pub fn conversation_key(number: &str) -> String {
+    let n = number.trim().trim_start_matches('<').trim_end_matches('>');
+    let n = n.strip_prefix("sip:").unwrap_or(n);
+    let (user, host) = match n.split_once('@') {
+        Some((user, host)) => (user, Some(host)),
+        None => (n, None),
+    };
+    let user: String = user.chars().filter(|c| !" -()./".contains(*c)).collect();
+    match host {
+        Some(host) => format!("{user}@{}", host.to_ascii_lowercase()),
+        None => user,
     }
 }
 
@@ -274,7 +365,7 @@ mod tests {
     use super::*;
 
     fn book() -> Phonebook {
-        Phonebook { store: Store::open_in_memory().ok(), contacts: Vec::new(), calls: Vec::new(), dialog: None }
+        Phonebook { store: Store::open_in_memory().ok(), contacts: Vec::new(), calls: Vec::new(), conversations: Vec::new(), revision: 0, dialog: None }
     }
 
     #[test]
@@ -287,6 +378,41 @@ mod tests {
         assert_eq!(b.import(vcf).unwrap(), (1, 2));
         assert_eq!(b.with_number("2").unwrap().name, "New");
         assert!(b.export().contains("FN:Zed"));
+    }
+
+    #[test]
+    fn conversation_keys_meet() {
+        assert_eq!(conversation_key("98765 43210"), "9876543210");
+        assert_eq!(conversation_key("<sip:+91 (98) 765-43210@Example.COM>"), "+919876543210@example.com");
+        assert_eq!(conversation_key("1001"), "1001");
+    }
+
+    #[test]
+    fn messages_are_kept_per_conversation() {
+        let mut b = book();
+        let msg = |peer: &str, outgoing, state, unread| MessageRecord {
+            id: 0,
+            peer: peer.into(),
+            name: String::new(),
+            outgoing,
+            time: 1,
+            text: "hi".into(),
+            state,
+            reason: String::new(),
+            unread,
+        };
+        let before = b.revision;
+        let id = b.add_message(&msg("1001", true, MessageState::Sending, false));
+        b.add_message(&msg("1001", false, MessageState::Received, true));
+        b.add_message(&msg("1002", false, MessageState::Received, true));
+        assert!(b.revision > before);
+        assert_eq!(b.unread(), 2);
+        b.set_message_state(id, MessageState::Sent, "200 OK");
+        b.mark_read("1001");
+        assert_eq!(b.unread(), 1);
+        assert_eq!(b.messages_with("1001")[0].state, MessageState::Sent);
+        b.delete_conversation("1002").unwrap();
+        assert_eq!(b.conversations.len(), 1);
     }
 
     fn ended(remote: &str, caller_id: Option<&str>) -> EndedCall {

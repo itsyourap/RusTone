@@ -90,6 +90,9 @@ pub struct Polled {
     pub show_window: bool,
     /// Calls that ended, for the history.
     pub ended: Vec<crate::calls::EndedCall>,
+    /// Text messages that arrived, and answers to ones we sent.
+    pub messages: Vec<sip_engine::IncomingMessage>,
+    pub message_statuses: Vec<sip_engine::MessageStatus>,
 }
 
 impl Sip {
@@ -223,6 +226,8 @@ impl Sip {
                 Event::Presence(p) => {
                     self.presence.insert(p.number.clone(), p);
                 }
+                Event::MessageReceived(m) => polled.messages.push(m),
+                Event::MessageStatus(s) => polled.message_statuses.push(s),
                 Event::Stopped => {
                     self.engine_state = EngineState::Stopped;
                     self.presence.clear();

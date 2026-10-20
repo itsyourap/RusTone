@@ -71,6 +71,13 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     changed |= widgets::toggle(ui, p, value, title).changed();
                 });
             }
+            let mut messaging = !calls.disable_messaging;
+            setting_row(ui, p, "Text messages", Some("Send and receive SIP messages"), |ui| {
+                if widgets::toggle(ui, p, &mut messaging, "Text messages").changed() {
+                    calls.disable_messaging = !messaging;
+                    changed = true;
+                }
+            });
             if changed {
                 app.mark_settings_dirty();
             }
