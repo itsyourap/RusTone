@@ -905,6 +905,9 @@ fn sections(ui: &mut Ui, app: &mut App, p: &Palette, tab: Tab) {
     app.ui.settings_layout.insert(tab, layout);
 }
 
+/// The settings window's size when it opens, in points.
+const DEFAULT_SIZE: [f32; 2] = [990.0, 618.0];
+
 /// The settings window's id, to open or bring it forward.
 pub fn window_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("rustone-settings")
@@ -918,9 +921,10 @@ pub fn show_window(ctx: &egui::Context, app: &mut App) {
         return;
     }
     let p = app.palette().clone();
-    // Most of the screen, so the columns fit without scrolling.
+    // The size chosen for it (three columns at 125%), smaller on a
+    // screen that can't hold it.
     let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1600.0, 900.0));
-    let size = [(monitor.x * 0.9).min(1800.0), (monitor.y * 0.88).min(1040.0)];
+    let size = [DEFAULT_SIZE[0].min(monitor.x * 0.95), DEFAULT_SIZE[1].min(monitor.y * 0.9)];
     let builder = egui::ViewportBuilder::default()
         .with_title("RusTone Settings")
         .with_app_id("rustone-settings")
