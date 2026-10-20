@@ -67,3 +67,40 @@ pub fn with_acc_info<R>(acc_id: pjsua_acc_id, f: impl FnOnce(&pjsua_acc_info) ->
     // SAFETY: on success pjsua has filled the struct; it isn't moved.
     unsafe { (pjsua_acc_get_info(acc_id, info.as_mut_ptr()) == PJ_SUCCESS).then(|| f(info.assume_init_ref())) }
 }
+
+/// A `pjsua_msg_data` with extra headers, for requests and responses
+/// pjsua builds (302 with Contact, 486 with a reason, BYE with Warning).
+/// Boxed because its header list points into itself.
+pub struct MsgData {
+    msg: Box<pjsua_msg_data>,
+    _strings: Vec<CString>,
+    _headers: Vec<Box<[u64]>>,
+}
+
+impl MsgData {
+    pub fn new(headers: &[(String, String)]) -> Self {
+        // SAFETY: plain C data; pjsua_msg_data_init fills it in place, and
+        // the box keeps its address while the list points into it.
+        let mut msg: Box<pjsua_msg_data> = Box::new(unsafe { std::mem::zeroed() });
+        unsafe { pjsua_msg_data_init(&mut *msg) };
+        let mut strings = Vec::new();
+        let mut storage = Vec::new();
+        // SAFETY: plain size query.
+        let words = unsafe { shim::jf_sizeof_generic_string_hdr() }.div_ceil(8);
+        for (name, value) in headers {
+            let (Ok(name), Ok(value)) = (CString::new(name.as_str()), CString::new(value.as_str())) else { continue };
+            let mut hdr: Box<[u64]> = vec![0u64; words].into_boxed_slice();
+            // SAFETY: `hdr` is large and aligned enough for the header; it,
+            // the strings and `msg` are kept (and don't move) with `self`.
+            unsafe { shim::jf_msg_data_add_hdr(&mut *msg, hdr.as_mut_ptr().cast(), name.as_ptr(), value.as_ptr()) };
+            strings.push(name);
+            strings.push(value);
+            storage.push(hdr);
+        }
+        Self { msg, _strings: strings, _headers: storage }
+    }
+
+    pub fn as_ptr(&self) -> *const pjsua_msg_data {
+        &*self.msg
+    }
+}

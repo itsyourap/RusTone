@@ -574,6 +574,8 @@ mod tests {
             caller_id: None,
             user_agent: None,
             diversion: None,
+            auto_answer_header: None,
+            call_info_header: None,
         }
     }
 

@@ -682,6 +682,24 @@ impl Session {
         check(unsafe { pjsua_call_answer2(call, opt_ptr, c_uint::from(code), std::ptr::null(), std::ptr::null()) }, "answering")
     }
 
+    /// A final response to an incoming call with a reason phrase and extra
+    /// headers.
+    pub fn respond(&mut self, call: CallId, code: u16, reason: &str, headers: &[(String, String)]) -> Result<(), String> {
+        let msg = util::MsgData::new(headers);
+        let reason_c = std::ffi::CString::new(reason).unwrap_or_default();
+        let reason_pj = pj_str_t { ptr: reason_c.as_ptr().cast_mut(), slen: reason_c.as_bytes().len() as pj_ssize_t };
+        let reason_ptr: *const pj_str_t = if reason.is_empty() { std::ptr::null() } else { &reason_pj };
+        // SAFETY: `msg` and the reason live until the call returns.
+        check(unsafe { pjsua_call_answer2(call, std::ptr::null(), c_uint::from(code), reason_ptr, msg.as_ptr()) }, "responding to the call")
+    }
+
+    /// Ends a call with `code` and extra headers.
+    pub fn end(&self, call: CallId, code: u16, headers: &[(String, String)]) {
+        let msg = util::MsgData::new(headers);
+        // SAFETY: `msg` lives until the call returns; an unknown id just fails.
+        unsafe { pjsua_call_hangup(call, c_uint::from(code), std::ptr::null(), msg.as_ptr()) };
+    }
+
     /// Ends a call; with code 0 pjsua picks CANCEL, BYE or 603.
     pub fn hangup(&self, call: CallId, code: u16) {
         // SAFETY: plain pjsua call; an unknown id just fails.

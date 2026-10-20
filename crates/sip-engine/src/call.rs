@@ -88,6 +88,10 @@ pub struct CallInfo {
     pub user_agent: Option<String>,
     /// Who the call was diverted from (Diversion header).
     pub diversion: Option<String>,
+    /// The caller's `X-AUTOANSWER` header, if any.
+    pub auto_answer_header: Option<String>,
+    /// The caller's `Call-Info` header, if any (`answer-after=N`).
+    pub call_info_header: Option<String>,
 }
 
 /// An audio codec pjsua offers, e.g. `AMR-WB/16000/1`.

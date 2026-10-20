@@ -64,8 +64,18 @@ pub enum Command {
     /// Respond to an incoming call: 180 to ring, 200 to answer, 486 to
     /// decline, 487 to ignore a duplicate.
     Answer { call: CallId, code: u16, video: bool },
+    /// Respond to an incoming call with a reason phrase and extra headers
+    /// (486 "Do Not Disturb", 302 with Contact and Diversion).
+    Respond { call: CallId, code: u16, reason: String, headers: Vec<(String, String)> },
     /// End a call (CANCEL, BYE or 603 as fits its state).
     Hangup(CallId),
+    /// End a call with a status code and extra headers (e.g.
+    /// auto hang-up sends a `Warning`).
+    End { call: CallId, code: u16, headers: Vec<(String, String)> },
+    /// Run `command` after `delay` (auto-answer, delayed forwarding, auto
+    /// hang-up). Dropped when its call ends, or gets another final answer
+    /// or hang-up first.
+    Later { delay: Duration, command: Box<Command> },
     HangupAll,
     Hold(CallId),
     Unhold(CallId),
@@ -105,6 +115,27 @@ pub enum Command {
     SetDebug(bool),
 }
 
+impl Command {
+    /// The call a command is about, if any.
+    pub fn call(&self) -> Option<CallId> {
+        match self {
+            Self::Answer { call, .. } | Self::Respond { call, .. } | Self::End { call, .. } => Some(*call),
+            Self::Hangup(call) | Self::Hold(call) | Self::Unhold(call) | Self::AddVideo(call) => Some(*call),
+            Self::Later { command, .. } => command.call(),
+            _ => None,
+        }
+    }
+
+    /// Whether it answers (finally) or ends its call.
+    fn settles_call(&self) -> bool {
+        match self {
+            Self::Answer { code, .. } | Self::Respond { code, .. } => *code >= 200,
+            Self::Hangup(_) | Self::End { .. } => true,
+            _ => false,
+        }
+    }
+}
+
 pub(crate) enum Message {
     Command(Box<Command>),
     /// A non-looping sound finished (from a media thread).
@@ -113,6 +144,8 @@ pub(crate) enum Message {
     DevicesChanged,
     /// The main account registered (from pjsua's callback).
     Registered,
+    /// A call ended (from pjsua's callback): its delayed commands go.
+    CallEnded(CallId),
     Shutdown,
 }
 
@@ -242,11 +275,17 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
     let mut next_meter = Instant::now();
     let mut next_quality = Instant::now();
     let mut quality = pj::QualityMonitor::default();
+    // Commands waiting for their time (Command::Later).
+    let mut scheduled: Vec<(Instant, Command)> = Vec::new();
 
     loop {
         // Wake for the next timer: device refresh, or (while debugging)
         // sampling stream statistics.
-        let deadline = [devices_due, debug_on.then_some(next_stats), meters_on.then_some(next_meter), meters_on.then_some(next_quality)].into_iter().flatten().min();
+        let first_scheduled = scheduled.iter().map(|(at, _)| *at).min();
+        let deadline = [devices_due, debug_on.then_some(next_stats), meters_on.then_some(next_meter), meters_on.then_some(next_quality), first_scheduled]
+            .into_iter()
+            .flatten()
+            .min();
         let received = match deadline {
             None => rx.recv(),
             Some(deadline) => match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -280,12 +319,19 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
                             pj::debug::poll_streams();
                         }
                     }
-                    continue;
+                    match scheduled.iter().position(|(at, _)| *at <= now) {
+                        Some(due) => Ok(Message::Command(Box::new(scheduled.remove(due).1))),
+                        None => continue,
+                    }
                 }
             },
         };
         let command = match received {
             Ok(Message::Command(command)) => *command,
+            Ok(Message::CallEnded(call)) => {
+                scheduled.retain(|(_, c)| c.call() != Some(call));
+                continue;
+            }
             Ok(Message::Registered) => {
                 if let Some(s) = &mut session {
                     s.start_presence();
@@ -304,7 +350,15 @@ fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<M
             }
             Ok(Message::Shutdown) | Err(_) => break,
         };
+        // A final answer or a hang-up settles the call: what was scheduled
+        // for it (say, forwarding after auto-answer) no longer applies.
+        if command.settles_call()
+            && let Some(call) = command.call()
+        {
+            scheduled.retain(|(_, c)| c.call() != Some(call));
+        }
         match command {
+            Command::Later { delay, command } => scheduled.push((Instant::now() + delay, *command)),
             Command::Restart(new_config) => {
                 config = new_config;
                 stop(&mut session, &sink);
@@ -415,7 +469,9 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
             }
         }
         Command::Answer { call, code, video } => call_error(Some(call), s.answer(call, code, video)),
+        Command::Respond { call, code, reason, headers } => call_error(Some(call), s.respond(call, code, &reason, &headers)),
         Command::Hangup(call) => s.hangup(call, 0),
+        Command::End { call, code, headers } => s.end(call, code, &headers),
         Command::HangupAll => s.hangup_all(),
         Command::Hold(call) => call_error(Some(call), s.hold(call)),
         Command::Unhold(call) => call_error(Some(call), s.unhold(call)),
@@ -437,6 +493,7 @@ fn call_command(s: &mut pj::Session, command: Command, sink: &Sink) {
         Command::StopSound => s.stop_sound(),
         // Handled by the engine loop.
         Command::Restart(_)
+        | Command::Later { .. }
         | Command::SetAccount(_)
         | Command::SetLocalAccount(_)
         | Command::Reregister

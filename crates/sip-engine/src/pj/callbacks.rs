@@ -176,6 +176,7 @@ pub unsafe extern "C" fn on_call_state(call_id: pjsua_call_id, _e: *mut pjsip_ev
         let ended = info.state == CallState::Disconnected;
         emit(Event::Call(info));
         if ended {
+            send_engine(Message::CallEnded(call_id));
             calls::forget_call(call_id);
             super::debug::call_ended(call_id);
         }

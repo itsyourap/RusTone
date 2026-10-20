@@ -20,8 +20,8 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::{pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_reg_info};
-    use std::ffi::{c_char, c_int, c_short, c_uint};
+    use super::{pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_msg_data, pjsua_reg_info};
+    use std::ffi::{c_char, c_int, c_short, c_uint, c_void};
 
     /// Called for every SIP message sent (`is_rx` 0) or received (1).
     pub type MsgCallback =
@@ -95,6 +95,13 @@ pub mod shim {
         /// Makes the answer to an incoming call's offer follow our codec
         /// priorities. Call from on_incoming_call.
         pub fn jf_prefer_local_codec_order(rdata: *mut pjsip_rx_data) -> pj_status_t;
+
+        /// Adds "name: value" to `msg`'s extra headers. `storage` holds
+        /// [`jf_sizeof_generic_string_hdr`] bytes; it, the strings and
+        /// `msg` must not move or drop before the message is sent.
+        pub fn jf_msg_data_add_hdr(msg: *mut pjsua_msg_data, storage: *mut c_void, name: *const c_char, value: *const c_char);
+
+        pub fn jf_sizeof_generic_string_hdr() -> usize;
 
         /// Registers the SIP message tap module (after pjsua_init).
         pub fn jf_msg_tap_install(cb: MsgCallback) -> pj_status_t;

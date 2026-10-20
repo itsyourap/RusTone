@@ -7,104 +7,15 @@
 //! asked: `cargo test -p sip-engine --test video_operator -- --ignored`.
 //! (A separate test binary, because pjsua is a singleton.)
 
-use std::net::{SocketAddr, UdpSocket};
+mod common;
+
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use common::{Peer, sdp, sdp_dir};
 use sip_engine::{CallState, Command, Direction, Engine, EngineConfig, Event, LocalAccountConfig, VideoConfig};
 
 const OPERATOR: &str = "127.0.0.1:5070";
-
-/// A SIP message as received.
-struct Msg {
-    first: String,
-    headers: Vec<(String, String)>,
-    body: String,
-    from: SocketAddr,
-}
-
-impl Msg {
-    fn header(&self, name: &str) -> &str {
-        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map_or("", |(_, v)| v.as_str())
-    }
-    fn is_request(&self, method: &str) -> bool {
-        self.first.starts_with(&format!("{method} "))
-    }
-    fn is_response(&self, code: u16, method: &str) -> bool {
-        self.first.starts_with(&format!("SIP/2.0 {code} ")) && self.header("CSeq").ends_with(method)
-    }
-    /// The SDP's media lines.
-    fn media(&self) -> Vec<&str> {
-        self.body.lines().filter(|l| l.starts_with("m=")).collect()
-    }
-}
-
-struct Operator {
-    socket: UdpSocket,
-    deadline: Instant,
-}
-
-impl Operator {
-    fn recv(&self, what: &str, want: impl Fn(&Msg) -> bool) -> Msg {
-        let mut buf = vec![0u8; 65536];
-        loop {
-            let left = self.deadline.saturating_duration_since(Instant::now());
-            assert!(!left.is_zero(), "timed out waiting for {what}");
-            self.socket.set_read_timeout(Some(left)).unwrap();
-            let Ok((n, from)) = self.socket.recv_from(&mut buf) else { continue };
-            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-            let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
-            let mut lines = head.lines();
-            let first = lines.next().unwrap_or_default().to_owned();
-            let headers = lines.filter_map(|l| l.split_once(':')).map(|(n, v)| (n.trim().to_owned(), v.trim().to_owned())).collect();
-            let msg = Msg { first, headers, body: body.to_owned(), from };
-            // Requests other than what we wait for still get a 200 (PRACK).
-            if msg.is_request("PRACK") && !what.contains("PRACK") {
-                self.reply(&msg, "200 OK", "", "");
-                continue;
-            }
-            if want(&msg) {
-                return msg;
-            }
-        }
-    }
-
-    fn send(&self, to: SocketAddr, text: &str) {
-        self.socket.send_to(text.as_bytes(), to).unwrap();
-    }
-
-    /// A response to `req`; `to_tag` is added to To when it has none.
-    fn reply(&self, req: &Msg, status: &str, extra: &str, sdp: &str) {
-        let to = req.header("To");
-        let to = if to.contains("tag=") { to.to_owned() } else { format!("{to};tag=op1") };
-        let content = if sdp.is_empty() { String::new() } else { "Content-Type: application/sdp\r\n".to_owned() };
-        let text = format!(
-            "SIP/2.0 {status}\r\nVia: {}\r\nFrom: {}\r\nTo: {to}\r\nCall-ID: {}\r\nCSeq: {}\r\nContact: <sip:op@{OPERATOR}>\r\n{extra}{content}Content-Length: {}\r\n\r\n{sdp}",
-            req.header("Via"),
-            req.header("From"),
-            req.header("Call-ID"),
-            req.header("CSeq"),
-            sdp.len()
-        );
-        self.send(req.from, &text);
-    }
-}
-
-fn sdp(version: u32, video_port: u16) -> String {
-    sdp_dir(version, video_port, "sendrecv")
-}
-
-/// `dir` is the operator's video direction ("recvonly": its camera is off).
-fn sdp_dir(version: u32, video_port: u16, dir: &str) -> String {
-    let video = if video_port == 0 {
-        "m=video 0 RTP/AVP 97\r\n".to_owned()
-    } else {
-        format!("m=video {video_port} RTP/AVP 97\r\na=rtpmap:97 H264/90000\r\na=fmtp:97 profile-level-id=42C00C; packetization-mode=1;\r\na={dir}\r\n")
-    };
-    format!(
-        "v=0\r\no=IBCF 1929502446 {version} IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 49032 RTP/AVP 0 120\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:120 telephone-event/8000\r\na=fmtp:120 0-15\r\na=sendrecv\r\n{video}"
-    )
-}
 
 /// The port of the `m=video` line(s) in a list of media lines.
 fn video_ports(media: &[&str]) -> Vec<u16> {
@@ -114,7 +25,7 @@ fn video_ports(media: &[&str]) -> Vec<u16> {
 #[test]
 #[ignore = "uses the video stack and UDP port 5070"]
 fn video_offered_by_the_operator_after_a_rejecting_183() {
-    let op = Operator { socket: UdpSocket::bind(OPERATOR).expect("UDP 5070 free"), deadline: Instant::now() + Duration::from_secs(30) };
+    let op = Peer::bind(OPERATOR, Duration::from_secs(30));
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
         local_account: true,

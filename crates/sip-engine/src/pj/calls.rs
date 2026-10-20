@@ -24,6 +24,9 @@ pub struct Headers {
     pub caller_id: Option<String>,
     pub user_agent: Option<String>,
     pub diversion: Option<String>,
+    /// `X-AUTOANSWER` and `Call-Info`, for auto-answer on request.
+    pub auto_answer: Option<String>,
+    pub call_info: Option<String>,
 }
 
 static HEADERS: LazyLock<Mutex<HashMap<CallId, Headers>>> = LazyLock::new(Mutex::default);
@@ -40,7 +43,9 @@ pub fn capture_headers(call_id: CallId, rdata: *const pjsip_rx_data) {
             None => uri,
         }
     });
-    lock(&HEADERS).insert(call_id, Headers { caller_id, user_agent, diversion });
+    let auto_answer = rdata_header(rdata, c"X-AUTOANSWER");
+    let call_info = rdata_header(rdata, c"Call-Info");
+    lock(&HEADERS).insert(call_id, Headers { caller_id, user_agent, diversion, auto_answer, call_info });
 }
 
 /// The caller ID of a received request: P-Asserted-Identity, else
@@ -134,6 +139,8 @@ fn snapshot(ci: &pjsua_call_info) -> CallInfo {
         caller_id: headers.caller_id,
         user_agent: headers.user_agent,
         diversion: headers.diversion,
+        auto_answer_header: headers.auto_answer,
+        call_info_header: headers.call_info,
     }
 }
 

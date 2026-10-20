@@ -76,6 +76,27 @@ pj_status_t jf_prefer_local_codec_order(pjsip_rx_data *rdata)
     return pjmedia_sdp_neg_set_prefer_remote_codec_order(inv->neg, PJ_FALSE);
 }
 
+/*
+ * Adds the header "name: value" to a message's extra headers. `storage`
+ * is caller memory of jf_sizeof_generic_string_hdr() bytes that, like the
+ * strings and `msg`, must stay put until the request or response is sent.
+ */
+void jf_msg_data_add_hdr(pjsua_msg_data *msg, void *storage,
+                         const char *name, const char *value)
+{
+    pjsip_generic_string_hdr *hdr = (pjsip_generic_string_hdr *)storage;
+    pj_str_t hname = pj_str((char *)name);
+    pj_str_t hvalue = pj_str((char *)value);
+
+    pjsip_generic_string_hdr_init2(hdr, &hname, &hvalue);
+    pj_list_push_back(&msg->hdr_list, hdr);
+}
+
+size_t jf_sizeof_generic_string_hdr(void)
+{
+    return sizeof(pjsip_generic_string_hdr);
+}
+
 size_t jf_sizeof_pjsua_config(void)           { return sizeof(pjsua_config); }
 size_t jf_sizeof_pjsua_media_config(void)     { return sizeof(pjsua_media_config); }
 size_t jf_sizeof_pjsua_logging_config(void)   { return sizeof(pjsua_logging_config); }

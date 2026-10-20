@@ -448,6 +448,8 @@ mod tests {
             caller_id: caller_id.map(str::to_owned),
             user_agent: None,
             diversion: None,
+            auto_answer_header: None,
+            call_info_header: None,
         };
         EndedCall { info, started: std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000), answered: true, reason: "Call ended".into() }
     }
