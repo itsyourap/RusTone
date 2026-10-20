@@ -2,7 +2,7 @@
 //! Remote video gets a tap per call; the preview gets one too. Taps may be
 //! added from pjsua's callback threads, so state is behind mutexes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_int, c_uint};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -29,6 +29,12 @@ struct Tap {
 unsafe impl Send for Tap {}
 
 static TAPS: LazyLock<Mutex<HashMap<VideoSource, Tap>>> = LazyLock::new(Mutex::default);
+/// Sources whose frames are kept. Removing a port from the bridge is only
+/// queued, so a removed tap can still deliver a frame; it's dropped here.
+/// Held while storing a frame, so a frame can't land after `disconnect`
+/// cleared the source. Never held across pjsua calls (the bridge thread
+/// takes it from inside the bridge).
+static LIVE: LazyLock<Mutex<HashSet<VideoSource>>> = LazyLock::new(Mutex::default);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -46,10 +52,16 @@ fn source_for(tap_id: c_int) -> VideoSource {
 unsafe extern "C" fn on_frame(tap_id: c_int, bgra: *const u8, width: c_uint, height: c_uint) {
     let _ = std::panic::catch_unwind(|| {
         let Some(frames) = lock(&FRAMES).clone() else { return };
+        let source = source_for(tap_id);
+        let live = lock(&LIVE);
+        if !live.contains(&source) {
+            return;
+        }
         let len = width as usize * height as usize * 4;
         // SAFETY: the shim checked the frame holds width*height BGRA pixels.
         let bgra = unsafe { std::slice::from_raw_parts(bgra, len) };
-        frames.put_bgra(source_for(tap_id), width, height, bgra);
+        frames.put_bgra(source, width, height, bgra);
+        drop(live);
     });
 }
 
@@ -71,17 +83,22 @@ fn connect(source: VideoSource, from: c_int) {
     let slot = unsafe { shim::jf_video_tap_add(tap_id, on_frame, from, w, h, &mut port) };
     if slot >= 0 {
         taps.insert(source, Tap { port, slot, source: from });
+        lock(&LIVE).insert(source);
     } else {
         log::warn!("cannot show video from bridge slot {from}");
     }
 }
 
 fn disconnect(source: VideoSource) {
+    {
+        let mut live = lock(&LIVE);
+        live.remove(&source);
+        if let Some(frames) = lock(&FRAMES).clone() {
+            frames.clear(source);
+        }
+    }
     if let Some(tap) = lock(&TAPS).remove(&source) {
         destroy(tap);
-    }
-    if let Some(frames) = lock(&FRAMES).clone() {
-        frames.clear(source);
     }
 }
 
@@ -121,10 +138,16 @@ pub fn untap_preview() {
 /// Removes every tap (session end).
 pub fn clear() {
     let taps: Vec<(VideoSource, Tap)> = lock(&TAPS).drain().collect();
-    for (source, tap) in taps {
-        destroy(tap);
+    {
+        let mut live = lock(&LIVE);
+        live.clear();
         if let Some(frames) = lock(&FRAMES).clone() {
-            frames.clear(source);
+            for (source, _) in &taps {
+                frames.clear(*source);
+            }
         }
+    }
+    for (_, tap) in taps {
+        destroy(tap);
     }
 }

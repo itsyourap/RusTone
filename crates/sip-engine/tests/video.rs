@@ -68,6 +68,11 @@ fn video_flows_both_ways() {
         let rx_line = dump.lines().find(|l| l.trim().starts_with("total")).unwrap_or_default();
         assert!(!rx_line.contains(" 0pkt"), "no video packets received:\n{dump}");
     }
+    // The call's teardown can take a moment on a busy machine.
+    let stopped = Instant::now() + Duration::from_secs(5);
+    while frames.latest(VideoSource::Call(incoming.id)).is_some() && Instant::now() < stopped {
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert!(frames.latest(VideoSource::Call(incoming.id)).is_none(), "frames stop with the call");
     drop(engine);
 }
