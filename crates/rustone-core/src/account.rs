@@ -102,6 +102,15 @@ impl Account {
         user.split('@').next().unwrap_or(user)
     }
 
+    /// The account's SIP address: `sip:user@host`, the host being the
+    /// username's own or else the domain.
+    pub fn sip_uri(&self) -> String {
+        let user = self.username.trim();
+        let user = user.strip_prefix("sip:").unwrap_or(user);
+        let domain = self.domain.trim();
+        if user.contains('@') || domain.is_empty() { format!("sip:{user}") } else { format!("sip:{user}@{domain}") }
+    }
+
     /// The name to show: label, else display name, else username, else server.
     pub fn title(&self) -> &str {
         [&self.label, &self.display_name, &self.username, &self.server]
@@ -144,6 +153,8 @@ mod tests {
         let a = Account { username: "+910000000000@sip.example.com".into(), ..Account::default() };
         assert_eq!(a.number(), "+910000000000");
         assert_eq!(Account { username: " sip:1001 ".into(), ..Account::default() }.number(), "1001");
+        assert_eq!(a.sip_uri(), "sip:+910000000000@sip.example.com");
+        assert_eq!(Account { username: "1001".into(), domain: "pbx.example".into(), ..Account::default() }.sip_uri(), "sip:1001@pbx.example");
     }
 
     #[test]

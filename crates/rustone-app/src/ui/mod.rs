@@ -15,6 +15,7 @@ use egui::{Align, Layout, Sense, Ui, Vec2, vec2};
 use fastframe_fonts::Weight;
 
 use crate::app::App;
+use rustone_core::account::Account;
 use crate::sip::Status;
 use crate::icons::Icon;
 use crate::theme::Palette;
@@ -147,8 +148,7 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (logo, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
         Icon::Phone.image(p.accent, 18.0).paint_at(ui, logo);
         ui.label(egui::RichText::new("RusTone").font(Weight::SemiBold.font_id(16.0)).color(p.text));
-        let account = app.settings.active().map(|a| (a.title().to_owned(), a.number().to_owned()));
-        status_chip(ui, p, &app.status(), account.as_ref().map(|(title, number)| (title.as_str(), number.as_str())));
+        status_chip(ui, p, &app.status(), app.settings.active());
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(reserve.inline_width);
@@ -169,9 +169,9 @@ fn header(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
-/// Registration status as a small pill; the account, its number and any
-/// error on hover. `account` is (name, number).
-fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<(&str, &str)>) {
+/// Registration status as a small pill; the account, its number, its SIP
+/// address and any error on hover.
+fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Account>) {
     let (dot, text) = match status {
         Status::Online | Status::Ready => (p.success, p.secondary),
         Status::Starting | Status::Connecting => (p.warning, p.secondary),
@@ -211,22 +211,26 @@ fn missed_badge(ui: &Ui, p: &Palette, center: egui::Pos2, count: u32) {
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
 }
 
-/// The status pill's hover text: account name and its number, then the
-/// status (or the error).
-fn status_hover(status: &Status, account: Option<(&str, &str)>) -> String {
-    match (status, account) {
-        (Status::NoAccount, _) => "Add an account in Settings".to_owned(),
-        (status, Some((name, number))) => {
-            // The number only when the name doesn't already show it.
-            let who = if number.is_empty() || name.contains(number) { name.to_owned() } else { format!("{name} · {number}") };
-            match status {
-                Status::Error(e) => format!("{who}\n{e}"),
-                s => format!("{who}\n{}", s.label()),
-            }
+/// The status pill's hover text: "Home · Online", the account's number,
+/// its SIP address, and the error when there is one.
+fn status_hover(status: &Status, account: Option<&Account>) -> String {
+    let Some(account) = account.filter(|_| *status != Status::NoAccount) else {
+        return match status {
+            Status::NoAccount => "Add an account in Settings".to_owned(),
+            Status::Error(e) => e.clone(),
+            s => s.label().to_owned(),
+        };
+    };
+    let mut lines = vec![format!("{} · {}", account.title(), status.label())];
+    for line in [account.number().to_owned(), account.sip_uri()] {
+        if !line.is_empty() && line != "sip:" {
+            lines.push(line);
         }
-        (Status::Error(e), None) => e.clone(),
-        (s, None) => s.label().to_owned(),
     }
+    if let Status::Error(e) = status {
+        lines.push(e.clone());
+    }
+    lines.join("\n")
 }
 
 fn nav(ui: &mut Ui, app: &mut App, p: &Palette) {
@@ -275,10 +279,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_hover_names_the_account_and_its_number() {
-        assert_eq!(status_hover(&Status::Online, Some(("Home", "+910000000000"))), "Home · +910000000000\nOnline");
-        assert_eq!(status_hover(&Status::Error("403 Forbidden".into()), Some(("Home", "1001"))), "Home · 1001\n403 Forbidden");
-        assert_eq!(status_hover(&Status::Online, Some(("1001", "1001"))), "1001\nOnline", "no repeat when the name is the number");
+    fn status_hover_names_the_account_its_number_and_address() {
+        let home = Account { label: "Home".into(), username: "+910000000000@sip.example.com".into(), ..Account::default() };
+        assert_eq!(status_hover(&Status::Online, Some(&home)), "Home · Online\n+910000000000\nsip:+910000000000@sip.example.com");
+        assert_eq!(
+            status_hover(&Status::Error("403 Forbidden".into()), Some(&home)),
+            "Home · Error\n+910000000000\nsip:+910000000000@sip.example.com\n403 Forbidden"
+        );
         assert_eq!(status_hover(&Status::NoAccount, None), "Add an account in Settings");
     }
 }
