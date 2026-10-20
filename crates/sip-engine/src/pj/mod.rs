@@ -471,7 +471,9 @@ impl Session {
         Ok(())
     }
 
-    /// Adds video to a call that has none (a re-INVITE).
+    /// Adds video to a call that has none (a re-INVITE). A video line the
+    /// answer rejected is turned on in place: a second `m=video` line makes
+    /// some networks drop the call (answering 604).
     pub fn add_video(&mut self, call: CallId) -> Result<(), String> {
         if !self.video.enabled {
             return Err("video calls are off".into());
@@ -479,10 +481,17 @@ impl Session {
         pj_default!(param: pjsua_call_vid_strm_op_param = pjsua_call_vid_strm_op_param_default);
         param.dir = PJMEDIA_DIR_ENCODING_DECODING;
         param.cap_dev = self.camera();
+        let op = match calls::unused_video_index(call) {
+            Some(index) => {
+                param.med_idx = index as c_int;
+                PJSUA_CALL_VID_STRM_CHANGE_DIR
+            }
+            None => PJSUA_CALL_VID_STRM_ADD,
+        };
         self.set_preview(true);
         calls::adding_video(call);
         // SAFETY: `param` initialised in place.
-        check(unsafe { pjsua_call_set_vid_strm(call, PJSUA_CALL_VID_STRM_ADD, &param) }, "adding video")
+        check(unsafe { pjsua_call_set_vid_strm(call, op, &param) }, "adding video")
     }
 
     /// Shows or hides the local preview of the chosen camera.

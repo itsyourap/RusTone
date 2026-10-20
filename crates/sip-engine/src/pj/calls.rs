@@ -202,6 +202,23 @@ pub fn adding_video(call_id: CallId) {
     lock(&CAMERA_OFF).remove(&call_id);
 }
 
+/// The media index of a video line the call has but doesn't use (rejected
+/// by the answer), to turn video on in place rather than add a second line.
+pub fn unused_video_index(call_id: CallId) -> Option<u32> {
+    let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
+    // SAFETY: filled on success and read in place.
+    let ci = unsafe {
+        if pjsua_call_get_info(call_id, info.as_mut_ptr()) != PJ_SUCCESS {
+            return None;
+        }
+        info.assume_init_ref()
+    };
+    ci.media[..(ci.media_cnt as usize).min(ci.media.len())]
+        .iter()
+        .find(|m| m.type_ == PJMEDIA_TYPE_VIDEO && m.status != PJSUA_CALL_MEDIA_ACTIVE)
+        .map(|m| m.index)
+}
+
 /// The call's video decoder slot, for drawing its video.
 pub fn video_decoder_slot(call_id: CallId) -> Option<pjsua_conf_port_id> {
     let mut info = std::mem::MaybeUninit::<pjsua_call_info>::zeroed();
