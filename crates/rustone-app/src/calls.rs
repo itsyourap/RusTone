@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
-use rustone_core::settings::{CallSettings, DtmfMethod};
+use rustone_core::settings::{AutoAnswerWhen, CallSettings, DtmfMethod};
 use sip_engine::{CallId, CallInfo, CallState, Command, Direction, Event, MediaState, Sound, uri_user_host};
 
 /// How long an ended call stays on screen with its reason.
@@ -44,11 +44,13 @@ pub struct Call {
     pub quality: Option<sip_engine::CallQuality>,
     /// Wall-clock start, for the history.
     pub started: SystemTime,
+    /// When the engine answers it by itself (auto-answer with a delay).
+    pub auto_answer_at: Option<Instant>,
 }
 
 impl Call {
     fn new(info: CallInfo) -> Self {
-        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None, started: SystemTime::now() }
+        Self { info, answered: None, ended: None, end_reason: None, silenced: false, hidden: false, transfer: None, hold_requested: false, quality: None, started: SystemTime::now(), auto_answer_at: None }
     }
 
     pub fn id(&self) -> CallId {
@@ -294,6 +296,23 @@ impl CallBook {
             return;
         }
         let others = self.live_count() > 0;
+        if let Some(delay) = self.auto_answer_delay(info, cfg) {
+            if delay.is_zero() {
+                // At once, with a beep instead of the ringtone.
+                self.handled_sip_ids.push(info.sip_call_id.clone());
+                self.calls.push(call);
+                self.current = Some(info.id);
+                out.commands.push(Command::Answer { call: info.id, code: 200, video: info.remote_video });
+                if cfg.local_dtmf {
+                    out.commands.push(self.play(Playing::OneShot, &self.sounds.call_waiting.clone(), false, IN_CALL_LEVEL));
+                }
+                out.show_window = cfg.bring_to_front;
+                return;
+            }
+            // Rings meanwhile; answering or declining first cancels it.
+            call.auto_answer_at = Some(Instant::now() + delay);
+            out.commands.push(Command::Later { delay, command: Box::new(Command::Answer { call: info.id, code: 200, video: info.remote_video }) });
+        }
         self.calls.push(call);
         out.commands.push(Command::Answer { call: info.id, code: 180, video: false });
         if others {
@@ -306,6 +325,23 @@ impl CallBook {
         }
         self.current = Some(info.id);
         out.show_window = cfg.bring_to_front;
+    }
+
+    /// Whether auto-answer takes the call, and after how long.
+    fn auto_answer_delay(&self, info: &CallInfo, cfg: &CallSettings) -> Option<Duration> {
+        let requested = rustone_core::rules::auto_answer_requested(info.auto_answer_header.as_deref(), info.call_info_header.as_deref());
+        let on = cfg.auto_answer || (cfg.auto_answer_on_request && requested.is_some());
+        let party = Party::parse(info.caller_id.as_deref().unwrap_or(&info.remote));
+        if !on || !rustone_core::rules::number_allowed(&cfg.auto_answer_numbers, &party.user) {
+            return None;
+        }
+        let others_allow = match cfg.auto_answer_when {
+            AutoAnswerWhen::NoOtherCalls => self.live_count() == 0,
+            AutoAnswerWhen::OthersOnHold => !self.calls.iter().any(|c| c.is_live() && c.info.media == MediaState::Active),
+            AutoAnswerWhen::Always => true,
+        };
+        let seconds = requested.flatten().filter(|_| cfg.auto_answer_on_request).unwrap_or(cfg.auto_answer_delay);
+        others_allow.then(|| Duration::from_secs(u64::from(seconds)))
     }
 
     fn update(&mut self, info: &CallInfo, cfg: &CallSettings, out: &mut Outcome) {
@@ -648,6 +684,50 @@ mod tests {
         b.account = Some(rustone_core::rules::Identity { user: "me".into(), domain: "pbx".into() });
         let out = b.on_event(&Event::IncomingCall(info(3, Direction::Incoming, CallState::Incoming, "<sip:300@pbx>")), &deny);
         assert_eq!(answers(&out), [180], "addressed to us: rings");
+    }
+
+    #[test]
+    fn auto_answer_at_once_or_after_ringing() {
+        let ring = |b: &mut CallBook, cfg: &CallSettings, i: CallInfo| b.on_event(&Event::IncomingCall(i), cfg);
+        let later = |out: &Outcome| {
+            out.commands.iter().find_map(|c| match c {
+                Command::Later { delay, command } if matches!(**command, Command::Answer { code: 200, .. }) => Some(*delay),
+                _ => None,
+            })
+        };
+        // On, no delay: answered at once (with video when offered), beep, no ringtone.
+        let mut b = book();
+        let cfg = CallSettings { auto_answer: true, ..CallSettings::default() };
+        let mut i = info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>");
+        i.remote_video = true;
+        let out = ring(&mut b, &cfg, i);
+        assert!(out.commands.contains(&Command::Answer { call: 1, code: 200, video: true }));
+        assert_eq!(played(&out), ["wait.wav"]);
+
+        // With a delay: it rings and the engine answers later.
+        let mut b = book();
+        let cfg = CallSettings { auto_answer: true, auto_answer_delay: 5, ..CallSettings::default() };
+        let out = ring(&mut b, &cfg, info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>"));
+        assert_eq!(answers(&out), [180]);
+        assert_eq!(later(&out), Some(Duration::from_secs(5)));
+        assert!(b.get(1).is_some_and(|c| c.auto_answer_at.is_some()));
+
+        // On request only: the caller's answer-after sets the delay.
+        let mut b = book();
+        let cfg = CallSettings { auto_answer_on_request: true, auto_answer_delay: 9, ..CallSettings::default() };
+        assert_eq!(later(&ring(&mut b, &cfg, info(1, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>"))), None, "not asked");
+        let mut b = book();
+        let mut i = info(2, Direction::Incoming, CallState::Incoming, "<sip:200@pbx>");
+        i.call_info_header = Some("<sip:pbx>;answer-after=2".into());
+        assert_eq!(later(&ring(&mut b, &cfg, i)), Some(Duration::from_secs(2)));
+
+        // Other numbers, or another call in progress: rings normally.
+        let mut b = book();
+        let cfg = CallSettings { auto_answer: true, auto_answer_numbers: "1*".into(), ..CallSettings::default() };
+        let out = ring(&mut b, &cfg, info(1, Direction::Incoming, CallState::Incoming, "<sip:200@pbx>"));
+        assert_eq!(answers(&out), [180]);
+        let out = ring(&mut b, &cfg, info(2, Direction::Incoming, CallState::Incoming, "<sip:100@pbx>"));
+        assert_eq!(answers(&out), [180], "busy with another call");
     }
 
     #[test]

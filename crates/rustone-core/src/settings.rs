@@ -153,6 +153,33 @@ pub struct CallSettings {
     pub dnd: bool,
     /// Incoming calls rejected outright.
     pub deny_incoming: DenyIncoming,
+    /// Answer every incoming call by itself (`all` is
+    /// the same with the switch kept on).
+    pub auto_answer: bool,
+    /// Answer by itself when the caller asks: `X-AUTOANSWER: true` or
+    /// `Call-Info: …;answer-after=N`.
+    pub auto_answer_on_request: bool,
+    /// Seconds of ringing before answering; 0 answers at once with a beep.
+    /// A caller's `answer-after` wins.
+    pub auto_answer_delay: u32,
+    /// Only these callers, separated by `;` or `|`, with `*` and `?`
+    /// wildcards; empty for everyone.
+    pub auto_answer_numbers: String,
+    /// When other calls don't stop it.
+    pub auto_answer_when: AutoAnswerWhen,
+}
+
+/// When auto-answer may answer while other calls exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoAnswerWhen {
+    /// Only without other calls.
+    #[default]
+    NoOtherCalls,
+    /// While every other call is on hold (`hold`).
+    OthersOnHold,
+    /// Always (`all`).
+    Always,
 }
 
 /// Which incoming calls are rejected with 486 "Denied" (its
@@ -220,6 +247,11 @@ impl Default for CallSettings {
             pickup_code: "**".into(),
             dnd: false,
             deny_incoming: DenyIncoming::Off,
+            auto_answer: false,
+            auto_answer_on_request: false,
+            auto_answer_delay: 0,
+            auto_answer_numbers: String::new(),
+            auto_answer_when: AutoAnswerWhen::NoOtherCalls,
         }
     }
 }

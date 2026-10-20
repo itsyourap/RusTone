@@ -9,6 +9,7 @@ pub const SHOW: &str = "show";
 pub const QUIT: &str = "quit";
 pub const DEBUG: &str = "debug";
 pub const DND: &str = "dnd";
+pub const AUTO_ANSWER: &str = "auto-answer";
 const STATUS: &str = "status";
 
 /// Creates the tray item. `None` if the platform has no tray.
@@ -25,6 +26,7 @@ pub fn spawn(wake: impl Fn() + Send + Sync + 'static) -> Option<Tray> {
                 MenuItem::action(STATUS, "Starting…").enabled(false),
                 MenuItem::Separator,
                 MenuItem::action(DND, toggle_label("Do not disturb", false)),
+                MenuItem::action(AUTO_ANSWER, toggle_label("Auto-answer", false)),
                 MenuItem::Separator,
                 MenuItem::action(SHOW, "Show RusTone"),
                 MenuItem::action(DEBUG, "Debug window"),
@@ -49,16 +51,18 @@ fn toggle_label(label: &str, on: bool) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Toggles {
     pub dnd: bool,
+    pub auto_answer: bool,
 }
 
 impl Toggles {
     pub fn of(calls: &rustone_core::settings::CallSettings) -> Self {
-        Self { dnd: calls.dnd }
+        Self { dnd: calls.dnd, auto_answer: calls.auto_answer }
     }
 }
 
 pub fn show_toggles(tray: &mut Tray, toggles: Toggles) {
     tray.set_label(DND, toggle_label("Do not disturb", toggles.dnd));
+    tray.set_label(AUTO_ANSWER, toggle_label("Auto-answer", toggles.auto_answer));
 }
 
 /// Shows the registration status: menu line, tooltip, a dimmed icon while

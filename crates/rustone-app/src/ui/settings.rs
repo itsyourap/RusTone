@@ -2,7 +2,7 @@
 //! Settings arrive in Phase 8.
 
 use egui::Ui;
-use rustone_core::settings::{DenyIncoming, DtmfMethod, ThemePreference};
+use rustone_core::settings::{AutoAnswerWhen, DenyIncoming, DtmfMethod, ThemePreference};
 
 use super::widgets::{self, card, section_title, setting_row, setting_stack};
 use crate::app::App;
@@ -95,6 +95,38 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(12.0);
 
+        section_title(ui, p, "Auto-answer");
+        card(ui, p, |ui| {
+            let calls = &mut app.settings.calls;
+            let mut changed = false;
+            for (value, title, description) in [
+                (&mut calls.auto_answer, "Answer every call", Some("Also under the status pill and in the tray")),
+                (&mut calls.auto_answer_on_request, "Answer when the caller asks", Some("X-AUTOANSWER or Call-Info answer-after (intercom, paging)")),
+            ] {
+                setting_row(ui, p, title, description, |ui| {
+                    changed |= widgets::toggle(ui, p, value, title).changed();
+                });
+            }
+            ui.separator();
+            changed |= widgets::number_field(ui, p, "Ring first for", &mut calls.auto_answer_delay, 0..=600, " s").changed();
+            changed |= widgets::text_field(ui, p, "Only these callers", "Everyone (e.g. 100;2*;+9133*)", &mut calls.auto_answer_numbers).changed();
+            ui.add_space(4.0);
+            setting_stack(ui, p, "While in another call", None, |ui| {
+                egui::ComboBox::from_id_salt("auto-answer-when")
+                    .width(ui.available_width())
+                    .selected_text(auto_answer_when_label(calls.auto_answer_when))
+                    .show_ui(ui, |ui| {
+                        for when in [AutoAnswerWhen::NoOtherCalls, AutoAnswerWhen::OthersOnHold, AutoAnswerWhen::Always] {
+                            changed |= ui.selectable_value(&mut calls.auto_answer_when, when, auto_answer_when_label(when)).changed();
+                        }
+                    });
+            });
+            if changed {
+                app.mark_settings_dirty();
+            }
+        });
+        ui.add_space(12.0);
+
         section_title(ui, p, "Features");
         card(ui, p, |ui| {
             ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
@@ -179,6 +211,14 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.add_space(8.0);
     });
+}
+
+fn auto_answer_when_label(when: AutoAnswerWhen) -> &'static str {
+    match when {
+        AutoAnswerWhen::NoOtherCalls => "Don't answer",
+        AutoAnswerWhen::OthersOnHold => "Answer if the others are on hold",
+        AutoAnswerWhen::Always => "Answer anyway",
+    }
 }
 
 fn deny_label(mode: DenyIncoming) -> &'static str {

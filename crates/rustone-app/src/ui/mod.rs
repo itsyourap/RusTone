@@ -214,7 +214,11 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     if dnd {
         dot = p.danger;
     }
-    let label = if dnd { "DND" } else { status.label() };
+    let mut label = if dnd { "DND" } else { status.label() }.to_owned();
+    if calls.auto_answer && status.is_online() {
+        label.push_str(" · AA");
+    }
+    let label = label.as_str();
     let galley = ui.painter().layout_no_wrap(label.to_owned(), Weight::Medium.font_id(11.5), text);
     // Leave room for the settings button; show only the dot when narrow.
     let show_text = ui.available_width() > galley.size().x + 90.0;
@@ -238,6 +242,10 @@ fn status_chip(ui: &mut Ui, p: &Palette, status: &Status, account: Option<&Accou
     if calls.dnd {
         hover.push_str("
 Do not disturb is on");
+    }
+    if calls.auto_answer {
+        hover.push_str("
+Auto-answer is on");
     }
     let response = response.on_hover_text(hover);
     // Its own id: the right-click menu uses the response's.
@@ -264,12 +272,14 @@ Do not disturb is on");
 /// The quick call toggles under the status pill.
 fn call_toggles(ui: &mut Ui, p: &Palette, calls: &mut CallSettings) {
     ui.set_min_width(220.0);
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Do not disturb").color(p.text));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            widgets::toggle(ui, p, &mut calls.dnd, "Do not disturb");
+    for (value, label) in [(&mut calls.dnd, "Do not disturb"), (&mut calls.auto_answer, "Auto-answer")] {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(label).color(p.text));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                widgets::toggle(ui, p, value, label);
+            });
         });
-    });
+    }
 }
 
 /// A count on a tab: missed calls (red), unread messages (accent).
