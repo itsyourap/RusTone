@@ -5,7 +5,6 @@ use std::ffi::{CString, c_char, c_int, c_uint};
 use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -26,8 +25,6 @@ macro_rules! pj_default {
     };
 }
 
-/// Everything pjsua logged during the session (for the Contact check).
-static LOG: Mutex<String> = Mutex::new(String::new());
 static ECHO_SIP: AtomicBool = AtomicBool::new(false);
 static AUTO_ANSWER: AtomicBool = AtomicBool::new(false);
 /// Set by `on_reg_state2` when an unregistration has completed.
@@ -46,23 +43,20 @@ pub struct Options {
     pub echo_sip: bool,
 }
 
-/// Runs one session. Returns its outcome and everything pjsua logged,
-/// which is returned even when the session fails.
-pub fn run(cfg: &Config, opts: &Options, stop: &AtomicBool) -> (Result<()>, String) {
+/// Runs one session.
+pub fn run(cfg: &Config, opts: &Options, stop: &AtomicBool) -> Result<()> {
     ECHO_SIP.store(opts.echo_sip, Ordering::Relaxed);
     AUTO_ANSWER.store(opts.answer, Ordering::Relaxed);
     UNREGISTERED.store(false, Ordering::Relaxed);
-    LOG.lock().unwrap().clear();
 
     let mut arena = Arena::default();
-    let result = unsafe {
+    unsafe {
         check(pjsua_create(), "pjsua_create").and_then(|()| {
             let result = session(cfg, opts, stop, &mut arena);
             pjsua_destroy();
             result
         })
-    };
-    (result, std::mem::take(&mut *LOG.lock().unwrap()))
+    }
 }
 
 unsafe fn session(cfg: &Config, opts: &Options, stop: &AtomicBool, arena: &mut Arena) -> Result<()> {
@@ -323,9 +317,6 @@ unsafe extern "C" fn on_log(level: c_int, data: *const c_char, len: c_int) {
         let text = String::from_utf8_lossy(bytes);
         if level <= 2 || ECHO_SIP.load(Ordering::Relaxed) {
             eprint!("{text}");
-        }
-        if let Ok(mut log) = LOG.lock() {
-            log.push_str(&text);
         }
     });
 }

@@ -1,8 +1,7 @@
-//! Phase 0 spike: drive pjproject from Rust, register to the JF router,
-//! place a call, and check the Contact headers that went out.
+//! A command-line check of a SIP account through pjproject: register,
+//! place or answer a call, and show the SIP traffic.
 
 mod config;
-mod contact_check;
 mod pj;
 
 use std::path::PathBuf;
@@ -11,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::config::Config;
@@ -25,7 +24,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Register, optionally call or wait for calls, unregister, then check Contacts.
+    /// Register, optionally call or wait for calls, then unregister.
     Run {
         /// Account and settings file.
         #[arg(short, long, default_value = "rustone-cli.toml")]
@@ -49,14 +48,11 @@ enum Command {
         #[arg(long)]
         sip: bool,
     },
-    /// Check the Contact headers in an existing pjsua log .
-    CheckLog { file: PathBuf },
 }
 
 fn main() -> ExitCode {
     match run(Cli::parse()) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::from(2),
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
             ExitCode::FAILURE
@@ -64,13 +60,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// Returns whether the Contact check passed.
-fn run(cli: Cli) -> Result<bool> {
+fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::CheckLog { file } => {
-            let bytes = std::fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-            Ok(print_contact_check(&String::from_utf8_lossy(&bytes)))
-        }
         Command::Run { config, call, duration, listen, answer, reg_timeout, sip } => {
             let cfg = Config::load(&config)?;
             let stop = Arc::new(AtomicBool::new(false));
@@ -84,16 +75,7 @@ fn run(cli: Cli) -> Result<bool> {
                 reg_timeout: Duration::from_secs(reg_timeout),
                 echo_sip: sip,
             };
-            // Check the Contacts even if the session failed part-way.
-            let (result, log) = pj::run(&cfg, &opts, &stop);
-            let passed = print_contact_check(&log);
-            result.map(|()| passed)
+            pj::run(&cfg, &opts, &stop)
         }
     }
-}
-
-fn print_contact_check(log: &str) -> bool {
-    let report = contact_check::check_log(log);
-    println!("\nContact check:\n{report}");
-    report.ok()
 }

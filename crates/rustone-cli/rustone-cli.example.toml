@@ -1,10 +1,10 @@
 # Copy to rustone-cli.toml (git-ignored) and fill in your account.
 
 [account]
-server = "sip.example.com"     # registrar
-proxy = "192.168.29.1:5068"       # outbound proxy(s), space-separated
-domain = "192.168.29.1:5068"      # appended to numbers that have no "@"
-username = "+91XXXXXXXXXX@sip.example.com"
+server = "sip.example.com"        # registrar
+proxy = ""                        # outbound proxy(s), space-separated
+domain = ""                       # appended to numbers that have no "@"
+username = "1001@sip.example.com"
 password = ""
 auth_id = ""                      # defaults to username
 display_name = ""
@@ -23,7 +23,7 @@ rport = true
 source_port = 0
 rtp_port_min = 52000
 rtp_port_max = 52200
-audio_codecs = "AMR-WB/16000/1 AMR/8000/1"
+audio_codecs = "G722/16000/1 PCMU/8000/1 PCMA/8000/1"
 vad = false
 ec = false
 log_file = "rustone-cli.log"

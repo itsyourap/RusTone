@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn file_names_carry_time_number_and_account() {
         assert_eq!(local_stamp().len(), "20261020-142233".len());
-        let path = file_in(Path::new("C:/rec"), "20261020-142233", "+91 345.7", "incoming", "Home: JF");
-        assert_eq!(path, Path::new("C:/rec").join("20261020-142233-+91_345_7-incoming-Home__JF.wav"));
+        let path = file_in(Path::new("C:/rec"), "20261020-142233", "+91 345.7", "incoming", "Home: Office");
+        assert_eq!(path, Path::new("C:/rec").join("20261020-142233-+91_345_7-incoming-Home__Office.wav"));
     }
 }
