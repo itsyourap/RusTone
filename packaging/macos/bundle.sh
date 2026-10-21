@@ -5,7 +5,8 @@
 #
 # 1. Copies the Homebrew libraries the binary links (OpenSSL, SDL2,
 #    OpenH264, AMR, …) into Contents/Frameworks and points the binary at
-#    them (dylibbundler), so the app runs without Homebrew.
+#    them (dylibbundler), plus SDL3, which sdl2-compat loads at run time,
+#    so the app runs without Homebrew.
 # 2. Signs the libraries and the app: with MACOS_SIGNING_IDENTITY
 #    ("Developer ID Application: …", hardened runtime, entitlements) when
 #    set, otherwise ad hoc (Apple Silicon runs no unsigned code).
@@ -22,6 +23,21 @@ command -v dylibbundler > /dev/null || brew install dylibbundler
 mkdir -p "$frameworks"
 dylibbundler --overwrite-files --bundle-deps --create-dir \
   --fix-file "$exe" --dest-dir "$frameworks" --install-path "@executable_path/../Frameworks/"
+
+# Homebrew's SDL2 is sdl2-compat, which loads SDL3 at run time (dlopen, so
+# dylibbundler can't see it), first from next to itself.
+if sdl3=$(brew --prefix sdl3 2> /dev/null) && [ -f "$sdl3/lib/libSDL3.dylib" ]; then
+  cp -L "$sdl3/lib/libSDL3.dylib" "$frameworks/libSDL3.dylib"
+  chmod u+w "$frameworks/libSDL3.dylib"
+  install_name_tool -id "@executable_path/../Frameworks/libSDL3.dylib" "$frameworks/libSDL3.dylib"
+  dylibbundler --overwrite-files --bundle-deps \
+    --fix-file "$frameworks/libSDL3.dylib" --dest-dir "$frameworks" --install-path "@executable_path/../Frameworks/"
+fi
+# Nothing may still point into Homebrew.
+if otool -L "$exe" "$frameworks"/*.dylib | grep -E "$(brew --prefix)|/usr/local/(opt|Cellar)"; then
+  echo "error: the app still links Homebrew libraries" >&2
+  exit 1
+fi
 
 identity=${MACOS_SIGNING_IDENTITY:--}
 if [ "$identity" = "-" ]; then
