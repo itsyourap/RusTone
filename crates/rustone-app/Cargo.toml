@@ -38,6 +38,10 @@ installer-mode = "currentUser"
 installer-icon = "../../packaging/icons/rustone.ico"
 appdata-paths = ["$APPDATA/itsyourap/RusTone", "$LOCALAPPDATA/itsyourap/RusTone"]
 
+[package.metadata.packager.wix]
+# cargo-packager's MSI template with ARM64 support.
+template = "../../packaging/windows/main.wxs"
+
 [package.metadata.packager.deb]
 package-name = "rustone"
 section = "comm"

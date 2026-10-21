@@ -41,6 +41,7 @@ bash packaging/macos/bundle.sh dist/packages/RusTone.app dist/packages/RusTone.d
 * `macos/entitlements.plist`: hardened-runtime entitlements for signed builds.
 * `macos/icns.sh`: makes `icons/rustone.icns` from the PNGs (`iconutil`).
 * `macos/bundle.sh`: bundles the libraries, signs, and makes the `.dmg`.
+* `windows/main.wxs`: cargo-packager's MSI template with ARM64 added.
 * `windows/sign.ps1`: Authenticode signing with `signtool`.
 
 ## Signing
