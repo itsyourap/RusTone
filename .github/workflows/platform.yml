@@ -202,6 +202,8 @@ jobs:
       - name: System dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         uses: ./.github/actions/system-deps
+        with:
+          save-cache: true
 
       - name: Set up MSVC
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
@@ -275,12 +277,26 @@ jobs:
           name: sdk-${{ inputs.name }}
           path: _sdk
       - uses: ./.github/actions/system-deps
+        with:
+          save-cache: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ inputs.name }}-test
+      # The downloaded crates, shared with the build jobs (which only read
+      # it); rust-cache above keeps each job's compiled target folder.
+      - name: Crates cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: crates-${{ inputs.name }}-${{ hashFiles('Cargo.lock') }}
+      - name: Fetch the crates
+        run: cargo fetch --locked
       # The committed bindings must match what bindgen makes from this
       # pjproject build. A new target's file is uploaded to commit.
       - name: Bindings are current (Linux, macOS)
@@ -342,6 +358,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ inputs.name }}-${{ matrix.profile }}
+      - name: Crates cache (from the test job)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: crates-${{ inputs.name }}-${{ hashFiles('Cargo.lock') }}
       - uses: ./.github/actions/system-deps
       - name: Build
         shell: pwsh

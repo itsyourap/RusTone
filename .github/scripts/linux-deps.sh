@@ -18,6 +18,17 @@ packages=(
 
 sudo=""
 if [ "$(id -u)" -ne 0 ]; then sudo="sudo"; fi
+# APT_ARCHIVES: keep the downloaded .deb files there (the CI caches it),
+# so a later install takes them from the folder instead of the network.
+archives=()
+if [ -n "${APT_ARCHIVES:-}" ]; then
+  mkdir -p "$APT_ARCHIVES/partial"
+  archives=(-o "Dir::Cache::archives=$APT_ARCHIVES")
+fi
 export DEBIAN_FRONTEND=noninteractive
 $sudo apt-get update -q
-$sudo apt-get install -y -q --no-install-recommends "${packages[@]}"
+$sudo apt-get install -y -q --no-install-recommends "${archives[@]}" "${packages[@]}"
+if [ -n "${APT_ARCHIVES:-}" ]; then
+  # apt runs as root; the cache step reads the folder as the runner user.
+  $sudo chown -R "$(id -u):$(id -g)" "$APT_ARCHIVES"
+fi

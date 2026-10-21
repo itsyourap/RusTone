@@ -1,14 +1,53 @@
 # Installs the system libraries that building pjproject and RusTone needs:
 # apt packages on Linux, Homebrew formulae on macOS. Windows builds its
 # dependencies from source in separate jobs, so this does nothing there.
+#
+# The downloads (apt's .deb files, Homebrew's bottles) are cached per
+# package list, so jobs after the first install without downloading. Jobs
+# with `save-cache` store them when the cache is new; the others only read.
 name: System dependencies
-description: Installs the build dependencies for the runner's OS.
+description: Installs the build dependencies for the runner's OS, with cached downloads.
+inputs:
+  save-cache:
+    description: Save the downloads when they weren't cached yet
+    default: "false"
 runs:
   using: composite
   steps:
+    # ---------------------------------------------------------- Linux --
+    - if: runner.os == 'Linux'
+      id: apt
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/apt-archives
+        key: apt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/linux-deps.sh') }}
     - if: runner.os == 'Linux'
       shell: bash
+      env:
+        APT_ARCHIVES: ${{ runner.temp }}/apt-archives
       run: bash .github/scripts/linux-deps.sh
+    - if: runner.os == 'Linux' && inputs.save-cache == 'true' && steps.apt.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/apt-archives
+        key: ${{ steps.apt.outputs.cache-primary-key }}
+
+    # ---------------------------------------------------------- macOS --
+    - if: runner.os == 'macOS'
+      id: brew-cache-dir
+      shell: bash
+      run: echo "dir=$(brew --cache)" >> "$GITHUB_OUTPUT"
+    - if: runner.os == 'macOS'
+      id: brew
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.brew-cache-dir.outputs.dir }}
+        key: brew-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/macos-deps.sh') }}
     - if: runner.os == 'macOS'
       shell: bash
       run: bash .github/scripts/macos-deps.sh
+    - if: runner.os == 'macOS' && inputs.save-cache == 'true' && steps.brew.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.brew-cache-dir.outputs.dir }}
+        key: ${{ steps.brew.outputs.cache-primary-key }}
