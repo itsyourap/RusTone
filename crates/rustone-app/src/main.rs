@@ -33,10 +33,10 @@ use crate::app::{App, Paths, Request, Requests};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const INSTANCE_ID: &str = "dev.itsyourap.rustone";
-/// The app's identity on the desktop: the Linux desktop entry's name (and
-/// the window's app id), the macOS bundle identifier and the notification
-/// sender.
-pub const DESKTOP_ID: &str = "dev.itsyourap.rustone";
+/// The Linux desktop entry and icon name the packages install
+/// (`rustone.desktop`); the window's app id and the media controls' and
+/// notifications' desktop entry must match it.
+pub const DESKTOP_ENTRY: &str = "rustone";
 
 const DIRS: fastframe_dirs::App = fastframe_dirs::App {
     // Not copied into a portable folder: the running copy's lock and logs.

@@ -143,7 +143,7 @@ mod imp {
         let quoted = program.replace('\\', r"\\").replace('"', r#"\""#);
         format!(
             "[Desktop Entry]\nType=Application\nName=RusTone\nComment=Call sip:, tel: and callto: links\n\
-             Exec=\"{quoted}\" %u\nIcon=dev.itsyourap.rustone\nNoDisplay=true\nMimeType={mime}\n"
+             Exec=\"{quoted}\" %u\nIcon=rustone\nNoDisplay=true\nMimeType={mime}\n"
         )
     }
 

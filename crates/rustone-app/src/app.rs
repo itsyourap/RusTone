@@ -39,7 +39,7 @@ const CREDENTIAL_SERVICE: &str = "RusTone";
 
 /// The notification service, under the same ID as the single-instance lock.
 fn notifier() -> Option<fastframe_notifications::Client> {
-    let app = fastframe_notifications::App::new(crate::DESKTOP_ID, "RusTone").logo(&crate::icons::logo_png(256), crate::icons::LOGO_BLUE);
+    let app = fastframe_notifications::App::new("dev.itsyourap.rustone", "RusTone").desktop_entry(crate::DESKTOP_ENTRY).logo(&crate::icons::logo_png(256), crate::icons::LOGO_BLUE);
     fastframe_notifications::Client::new(app).map_err(|e| log::warn!("notifications unavailable: {e}")).ok()
 }
 
