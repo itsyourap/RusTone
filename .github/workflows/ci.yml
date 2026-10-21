@@ -201,6 +201,9 @@ jobs:
         with:
           msystem: UCRT64
           update: false
+          # Only runs when the library isn't cached; both AMR jobs would also
+          # race to save the same package cache.
+          cache: false
           install: make curl tar
           pacboy: gcc:p
       - name: Build (Windows)
