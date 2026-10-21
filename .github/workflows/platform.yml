@@ -1,0 +1,446 @@
+# One platform's chain, called by ci.yml once per platform. The chains run
+# independently: one platform failing doesn't stop the others.
+#
+#   deps       pjproject's dependencies built from source, in parallel
+#              (only platforms with `source-deps`; one failing cancels the
+#              rest and fails this chain)
+#   pjproject  the fork, cached per commit and dependency set
+#   test       clippy and the workspace tests
+#   build      debug and release binaries; the release build also makes the
+#              installers (NSIS + MSI, .deb + AppImage, .dmg)
+#
+# Linux and macOS take the dependencies from apt/Homebrew instead
+# (.github/actions/system-deps).
+name: Platform
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: Artifact and cache suffix, e.g. windows-x64
+        type: string
+        required: true
+      os:
+        description: Runner image
+        type: string
+        required: true
+      target:
+        description: Rust target triple
+        type: string
+        required: true
+      source-deps:
+        description: Build pjproject's dependencies from source
+        type: boolean
+        default: false
+
+env:
+  PJPROJECT_REPO: itsyourap/pjproject
+  PJPROJECT_REF: rustone-2.17
+  CARGO_PACKAGER_VERSION: 0.11.8
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------- deps --
+
+  deps:
+    name: ${{ matrix.dep }}
+    if: inputs.source-deps
+    strategy:
+      # One dependency failing cancels the others (this chain only).
+      fail-fast: true
+      matrix:
+        include:
+          - { dep: sdl2, version: 2.32.10 }
+          # vcpkg's current OpenSSL 3; bump to rebuild.
+          - { dep: openssl, version: v1 }
+          - { dep: openh264, version: 2.6.0 }
+          - { dep: opencore-amr, version: 0.1.6 }
+          - { dep: vo-amrwbenc, version: 0.1.3 }
+    runs-on: ${{ inputs.os }}
+    env:
+      DEP: ${{ matrix.dep }}
+      DEP_VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _dep
+          key: dep-${{ inputs.name }}-${{ matrix.dep }}-${{ matrix.version }}
+
+      - name: SDL2 (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'sdl2'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin, _build | Out-Null
+          curl.exe -fsSL --retry 3 -o _build/sdl2.zip "https://github.com/libsdl-org/SDL/releases/download/release-$env:DEP_VERSION/SDL2-devel-$env:DEP_VERSION-VC.zip"
+          Expand-Archive _build/sdl2.zip _build
+          $sdl = "_build/SDL2-$env:DEP_VERSION"
+          Copy-Item "$sdl/include/*" _dep/include
+          Copy-Item "$sdl/lib/x64/*.lib" _dep/lib
+          Copy-Item "$sdl/lib/x64/SDL2.dll" _dep/bin
+
+      - name: OpenSSL with vcpkg (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openssl'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows-release
+          if ($LASTEXITCODE) { throw "vcpkg failed" }
+          $ssl = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-release"
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin | Out-Null
+          Copy-Item -Recurse "$ssl/include/openssl" _dep/include
+          Copy-Item "$ssl/lib/libcrypto.lib", "$ssl/lib/libssl.lib" _dep/lib
+          Copy-Item "$ssl/bin/libcrypto-3-x64.dll", "$ssl/bin/libssl-3-x64.dll" _dep/bin
+
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264'
+        uses: ./.github/actions/msvc
+      - name: Set up NASM (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264'
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          if ($LASTEXITCODE) { throw "choco install nasm failed" }
+          "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
+      - name: OpenH264 with meson
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.dep == 'openh264'
+        shell: pwsh
+        run: |
+          pip install meson ninja
+          git clone --depth 1 --branch "v$env:DEP_VERSION" https://github.com/cisco/openh264 _build/openh264
+          $extra = @()
+          if ($IsWindows) { $extra += "-Db_vscrt=mt" }
+          meson setup _build/openh264-build _build/openh264 "--prefix=$PWD/_dep" --libdir=lib --buildtype=release `
+            -Ddefault_library=static -Dtests=disabled @extra
+          if ($LASTEXITCODE) { throw "meson setup failed" }
+          meson install -C _build/openh264-build
+          if ($LASTEXITCODE) { throw "meson install failed" }
+          # pjproject links "openh264.lib"; meson names static libraries lib*.a.
+          if ($IsWindows) { Move-Item -Force _dep/lib/libopenh264.a _dep/lib/openh264.lib }
+
+      # pjproject's MSVC build links the GCC-built static AMR libraries
+      # (PJMEDIA_OPENCORE_AMR_BUILT_WITH_GCC); UCRT64 matches MSVC's CRT.
+      - name: Set up MSYS2 (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && (matrix.dep == 'opencore-amr' || matrix.dep == 'vo-amrwbenc')
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          # Only runs when the library isn't cached; both AMR jobs would also
+          # race to save the same package cache.
+          cache: false
+          install: make curl tar
+          pacboy: gcc:p
+      - name: ${{ matrix.dep }} with MSYS2 (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && (matrix.dep == 'opencore-amr' || matrix.dep == 'vo-amrwbenc')
+        shell: msys2 {0}
+        run: |
+          set -e
+          prefix=$(cygpath -u "$GITHUB_WORKSPACE/_dep")
+          mkdir -p _build && cd _build
+          src="$DEP-$DEP_VERSION"
+          curl -fsSL --retry 3 -o "$src.tar.gz" "https://downloads.sourceforge.net/project/opencore-amr/$DEP/$src.tar.gz"
+          tar xzf "$src.tar.gz"
+          cd "$src"
+          ./configure --prefix="$prefix" --enable-static --disable-shared
+          make -j4
+          make install
+          # GCC calls ___chkstk_ms for large stack frames; MSVC's linker can't
+          # find it, so add libgcc's object to the archive that needs it
+          # (https://docs.pjsip.org/en/latest/specific-guides/audio/opencore-amr.html#windows).
+          ar x "$(gcc -print-libgcc-file-name)" _chkstk_ms.o
+          for lib in "$prefix"/lib/*.a; do
+            if nm "$lib" 2>/dev/null | grep -q "U ___chkstk_ms"; then
+              echo "adding _chkstk_ms.o to $(basename "$lib")"
+              ar q "$lib" _chkstk_ms.o
+            fi
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dep-${{ inputs.name }}-${{ matrix.dep }}
+          path: _dep
+          if-no-files-found: error
+          retention-days: 1
+
+  # ----------------------------------------------------------- pjproject --
+
+  pjproject:
+    name: pjproject
+    needs: deps
+    # Runs after the dependencies, or without them where there are none.
+    if: ${{ !cancelled() && (needs.deps.result == 'success' || needs.deps.result == 'skipped') }}
+    runs-on: ${{ inputs.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: inputs.source-deps
+        uses: actions/download-artifact@v8
+        with:
+          pattern: dep-${{ inputs.name }}-*
+          path: _sdk/deps
+          merge-multiple: true
+
+      - name: Resolve the pjproject commit
+        id: pj
+        run: |
+          $sha = (git ls-remote "https://github.com/$env:PJPROJECT_REPO" "refs/heads/$env:PJPROJECT_REF").Split()[0]
+          if (-not $sha) { throw "branch $env:PJPROJECT_REF not found" }
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: _sdk/pjproject
+          # The fork's commit, our config_site.h, the build scripts and the
+          # dependencies built above.
+          key: pjproject-${{ inputs.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '.github/scripts/*', '_sdk/deps/**') }}
+
+      - name: System dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/system-deps
+
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: ./.github/actions/msvc
+
+      - name: Fetch the fork
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch $env:PJPROJECT_REF "https://github.com/$env:PJPROJECT_REPO" _build/pjproject
+          git -C _build/pjproject checkout ${{ steps.pj.outputs.sha }}
+          Copy-Item crates/pjsua-sys/config_site.h _build/pjproject/pjlib/include/pj/config_site.h
+
+      - name: Build (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          $deps = "$env:GITHUB_WORKSPACE\_sdk\deps"
+          @"
+          <Project>
+            <ItemDefinitionGroup>
+              <ClCompile><AdditionalIncludeDirectories>$deps\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+              <Link><AdditionalLibraryDirectories>$deps\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories></Link>
+            </ItemDefinitionGroup>
+          </Project>
+          "@ | Set-Content _build/pjproject/Directory.Build.props
+          msbuild _build/pjproject/pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /m /v:minimal
+          if ($LASTEXITCODE) { throw "msbuild failed" }
+
+      - name: Build and install (Linux, macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/build-pjproject.sh _build/pjproject _sdk/pjproject crates/pjsua-sys/config_site.h
+
+      - name: Stage headers and libraries (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          $src = "_build/pjproject"
+          $dst = "_sdk/pjproject"
+          foreach ($m in "pjlib", "pjlib-util", "pjnath", "pjmedia", "pjsip") {
+            New-Item -ItemType Directory -Force "$dst/$m" | Out-Null
+            Copy-Item -Recurse "$src/$m/include" "$dst/$m/include"
+          }
+          New-Item -ItemType Directory -Force "$dst/lib", "$dst/third_party/lib" | Out-Null
+          Copy-Item "$src/lib/*.lib" "$dst/lib"
+          Copy-Item "$src/third_party/lib/*.lib" "$dst/third_party/lib"
+
+      - name: SDK size
+        run: |
+          Get-ChildItem -Recurse _sdk -File | Measure-Object -Sum Length | ForEach-Object { "SDK: $($_.Count) files, $([math]::Round($_.Sum / 1MB)) MB" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdk-${{ inputs.name }}
+          path: _sdk
+          retention-days: 1
+
+  # ----------------------------------------------------------------- app --
+
+  test:
+    name: test
+    needs: pjproject
+    # Explicit: pjproject itself may follow a skipped deps job.
+    if: ${{ !cancelled() && needs.pjproject.result == 'success' }}
+    runs-on: ${{ inputs.os }}
+    env:
+      PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
+      RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdk-${{ inputs.name }}
+          path: _sdk
+      - uses: ./.github/actions/system-deps
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ inputs.name }}-test
+      # The committed bindings must match what bindgen makes from this
+      # pjproject build. A new target's file is uploaded to commit.
+      - name: Bindings are current (Linux, macOS)
+        id: bindings
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo build -p pjsua-sys --features regen --locked
+          if [ -n "$(git status --porcelain crates/pjsua-sys/src/bindings)" ]; then
+            git status --short crates/pjsua-sys/src/bindings
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.bindings.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ inputs.name }}
+          path: crates/pjsua-sys/src/bindings/
+          if-no-files-found: error
+      - if: steps.bindings.outputs.changed == 'true'
+        shell: bash
+        run: |
+          echo "::error::crates/pjsua-sys/src/bindings is out of date for ${{ inputs.target }}; commit the uploaded bindings-${{ inputs.name }} artifact"
+          exit 1
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  build:
+    name: build (${{ matrix.profile }})
+    needs: test
+    if: ${{ !cancelled() && needs.test.result == 'success' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        profile: [debug, release]
+    runs-on: ${{ inputs.os }}
+    env:
+      PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
+      RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
+      DIST: dist/rustone-${{ inputs.name }}-${{ matrix.profile }}
+      PACKAGES: dist/packages
+      # Optional signing: packages are signed only when these secrets exist.
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdk-${{ inputs.name }}
+          path: _sdk
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ inputs.name }}-${{ matrix.profile }}
+      - uses: ./.github/actions/system-deps
+      - name: Build
+        shell: pwsh
+        run: |
+          $flags = @("--workspace", "--locked")
+          if ("${{ matrix.profile }}" -eq "release") { $flags += "--release" }
+          cargo build @flags
+          if ($LASTEXITCODE) { throw "cargo build failed" }
+      - name: Collect binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.profile }}"
+          New-Item -ItemType Directory -Force $env:DIST | Out-Null
+          Copy-Item "$bin/rustone.exe", "$bin/rustone-cli.exe", "$bin/rustone.pdb", "$bin/rustone_cli.pdb", "$bin/*.dll" $env:DIST
+      - name: Collect binaries (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$DIST"
+          cp "target/${{ matrix.profile }}/rustone" "target/${{ matrix.profile }}/rustone-cli" "$DIST/"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rustone-${{ inputs.name }}-${{ matrix.profile }}
+          path: ${{ env.DIST }}
+
+      # ------------------------------------------------ installers (release) --
+      - name: Install cargo-packager
+        if: matrix.profile == 'release'
+        shell: bash
+        run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
+
+      - name: Set up MSVC (Windows signing)
+        if: matrix.profile == 'release' && runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        uses: ./.github/actions/msvc
+      - name: Sign the binaries (Windows)
+        if: matrix.profile == 'release' && runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: ./packaging/windows/sign.ps1 target/release/rustone.exe, target/release/rustone-cli.exe
+      - name: Installers (Windows)
+        if: matrix.profile == 'release' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo packager -p rustone-app --release -f nsis,wix -o $env:PACKAGES
+          if ($LASTEXITCODE) { throw "cargo packager failed" }
+          if ($env:WINDOWS_CERTIFICATE) {
+            ./packaging/windows/sign.ps1 (Get-ChildItem $env:PACKAGES -File -Include *.exe, *.msi -Recurse).FullName
+          }
+
+      - name: Installers (Linux)
+        if: matrix.profile == 'release' && runner.os == 'Linux'
+        shell: bash
+        env:
+          # linuxdeploy is an AppImage; the runner has no FUSE for it.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          sudo apt-get install -y -q --no-install-recommends file squashfs-tools
+          # The installed program needs no debug info (the build artifact
+          # above keeps it).
+          strip target/release/rustone target/release/rustone-cli
+          cargo packager -p rustone-app --release -f deb,appimage -o "$PACKAGES"
+
+      - name: Signing keychain (macOS)
+        if: matrix.profile == 'release' && runner.os == 'macOS' && env.MACOS_CERTIFICATE != ''
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+      - name: Installers (macOS)
+        if: matrix.profile == 'release' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          strip -S target/release/rustone target/release/rustone-cli
+          cargo packager -p rustone-app --release -f app -o "$PACKAGES"
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustone-app") | .version')
+          dmg="$PACKAGES/RusTone_${version}_aarch64.dmg"
+          bash packaging/macos/bundle.sh "$PACKAGES/RusTone.app" "$dmg"
+          if [ -n "$APPLE_ID" ] && [ -n "$MACOS_SIGNING_IDENTITY" ]; then
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$dmg"
+          fi
+          # The .dmg carries the app; don't upload the bundle on its own.
+          rm -rf "$PACKAGES/RusTone.app"
+
+      - name: Upload the installers
+        if: matrix.profile == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ inputs.name }}
+          # cargo-packager keeps its downloaded tools in .cargo-packager.
+          path: |
+            ${{ env.PACKAGES }}/*
+            !${{ env.PACKAGES }}/.cargo-packager
+          if-no-files-found: error
