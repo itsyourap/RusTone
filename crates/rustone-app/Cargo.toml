@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "rustone"
@@ -17,6 +18,8 @@ product-name = "RusTone"
 identifier = "dev.itsyourap.rustone"
 publisher = "itsyourap"
 authors = ["itsyourap"]
+# Shown by the NSIS and MSI installers.
+license-file = "../../LICENSE"
 description = "Universal SIP softphone"
 homepage = "https://github.com/itsyourap/RusTone"
 category = "Business"
