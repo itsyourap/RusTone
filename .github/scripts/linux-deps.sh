@@ -13,7 +13,7 @@ packages=(
   # RusTone: eframe (X11/Wayland), tray, file dialogs, HID headsets,
   # Secret Service, idle detection
   libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libudev-dev libdbus-1-dev
-  libxss-dev libx11-dev libxkbcommon-dev libwayland-dev
+  libxss-dev libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 )
 
 sudo=""

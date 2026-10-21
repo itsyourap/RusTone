@@ -75,8 +75,13 @@ fn err(e: rusqlite::Error) -> String {
 }
 
 impl Store {
-    /// Opens (creating if needed) the database at `path` and brings its schema up to date.
+    /// Opens (creating it and its folder if needed) the database at `path`
+    /// and brings its schema up to date.
     pub fn open(path: &Path) -> Result<Self> {
+        // On a first run the config folder may not exist yet.
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
         let conn = Connection::open(path).map_err(err)?;
         conn.pragma_update(None, "journal_mode", "WAL").map_err(err)?;
         conn.pragma_update(None, "synchronous", "NORMAL").map_err(err)?;
@@ -392,6 +397,15 @@ mod tests {
         let store = Store::open(&path).unwrap();
         let m = &store.messages_with("1001").unwrap()[0];
         assert_eq!((m.state, m.reason.as_str()), (MessageState::Failed, "Not sent"));
+        drop(store);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn opening_creates_the_folder() {
+        let dir = std::env::temp_dir().join(format!("rustone-store-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir.join("config").join(FILE_NAME)).expect("a first run creates the folder");
         drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
     }

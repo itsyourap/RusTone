@@ -46,7 +46,7 @@ depends = [
   "libc6", "libgcc-s1", "libssl3t64 | libssl3", "libsdl2-2.0-0", "libopenh264-7",
   "libopencore-amrnb0", "libopencore-amrwb0", "libvo-amrwbenc0",
   "libasound2t64 | libasound2", "libv4l-0t64 | libv4l-0", "libuuid1", "libudev1", "libdbus-1-3",
-  "libx11-6", "libxss1", "libxcursor1", "libxkbcommon0", "libwayland-client0", "libegl1",
+  "libx11-6", "libxss1", "libxcursor1", "libxkbcommon0", "libxkbcommon-x11-0", "libwayland-client0", "libegl1",
 ]
 
 [package.metadata.packager.appimage]
