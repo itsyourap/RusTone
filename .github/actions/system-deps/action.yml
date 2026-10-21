@@ -1,0 +1,14 @@
+# Installs the system libraries that building pjproject and RusTone needs:
+# apt packages on Linux, Homebrew formulae on macOS. Windows builds its
+# dependencies from source in separate jobs, so this does nothing there.
+name: System dependencies
+description: Installs the build dependencies for the runner's OS.
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: bash .github/scripts/linux-deps.sh
+    - if: runner.os == 'macOS'
+      shell: bash
+      run: bash .github/scripts/macos-deps.sh

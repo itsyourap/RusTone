@@ -1,12 +1,14 @@
 # Builds pjproject (from the fork) and its dependencies, then tests RusTone,
 # then builds the debug and release binaries.
 #
-# Stages, each a matrix over the platforms listed in the `platforms` job
-# (only Windows for now; Linux and macOS come later):
-#   sdl2, openssl, openh264, amr  (in parallel, each cached)
+# Stages, each a matrix over the platforms listed in the `platforms` job:
+#   sdl2, openssl, openh264, amr  (in parallel, each cached; only platforms
+#                                  that build their dependencies from source)
 #     -> pjproject                (cached per fork commit)
 #       -> test
 #         -> build (debug, release)
+# Linux and macOS take the dependencies from apt/Homebrew instead
+# (.github/actions/system-deps).
 name: CI
 
 on:
@@ -35,12 +37,20 @@ jobs:
     name: platforms
     runs-on: ubuntu-24.04
     outputs:
-      list: ${{ steps.list.outputs.list }}
+      all: ${{ steps.list.outputs.all }}
+      deps: ${{ steps.list.outputs.deps }}
     steps:
       - id: list
-        # name: artifact/cache suffix; os: runner image.
+        # name: artifact/cache suffix; os: runner image; target: Rust target;
+        # source_deps: builds pjproject's dependencies in the jobs below.
         run: |
-          echo 'list=[{"name": "windows-x64", "os": "windows-2025"}]' >> "$GITHUB_OUTPUT"
+          all='[
+            {"name": "windows-x64", "os": "windows-2025", "target": "x86_64-pc-windows-msvc", "source_deps": true},
+            {"name": "linux-x64", "os": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu", "source_deps": false},
+            {"name": "macos-arm64", "os": "macos-15", "target": "aarch64-apple-darwin", "source_deps": false}
+          ]'
+          echo "all=$(jq -c . <<< "$all")" >> "$GITHUB_OUTPUT"
+          echo "deps=$(jq -c 'map(select(.source_deps))' <<< "$all")" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------- deps --
 
@@ -50,7 +60,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.deps) }}
     runs-on: ${{ matrix.platform.os }}
     steps:
       - id: cache
@@ -88,7 +98,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.deps) }}
     runs-on: ${{ matrix.platform.os }}
     steps:
       - id: cache
@@ -126,7 +136,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.deps) }}
     runs-on: ${{ matrix.platform.os }}
     steps:
       - uses: actions/checkout@v7
@@ -179,7 +189,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.deps) }}
         package:
           - { name: opencore-amr, version: 0.1.6 }
           - { name: vo-amrwbenc, version: 0.1.3 }
@@ -251,7 +261,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.all) }}
     runs-on: ${{ matrix.platform.os }}
     defaults:
       run:
@@ -259,7 +269,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v8
+      - if: matrix.platform.source_deps
+        uses: actions/download-artifact@v8
         with:
           pattern: dep-${{ matrix.platform.name }}-*
           path: _sdk/deps
@@ -276,8 +287,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: _sdk/pjproject
-          # The fork's commit, our config_site.h and the dependencies built above.
-          key: pjproject-${{ matrix.platform.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '_sdk/deps/**') }}
+          # The fork's commit, our config_site.h, the build scripts and the
+          # dependencies built above.
+          key: pjproject-${{ matrix.platform.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '.github/scripts/*', '_sdk/deps/**') }}
+
+      - name: System dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/system-deps
 
       - name: Set up MSVC
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
@@ -305,8 +321,13 @@ jobs:
           msbuild _build/pjproject/pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /m /v:minimal
           if ($LASTEXITCODE) { throw "msbuild failed" }
 
-      - name: Stage headers and libraries
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Build and install (Linux, macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/build-pjproject.sh _build/pjproject _sdk/pjproject crates/pjsua-sys/config_site.h
+
+      - name: Stage headers and libraries (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         run: |
           $src = "_build/pjproject"
           $dst = "_sdk/pjproject"
@@ -315,9 +336,8 @@ jobs:
             Copy-Item -Recurse "$src/$m/include" "$dst/$m/include"
           }
           New-Item -ItemType Directory -Force "$dst/lib", "$dst/third_party/lib" | Out-Null
-          $ext = if ($IsWindows) { "lib" } else { "a" }
-          Copy-Item "$src/lib/*.$ext" "$dst/lib"
-          Copy-Item "$src/third_party/lib/*.$ext" "$dst/third_party/lib"
+          Copy-Item "$src/lib/*.lib" "$dst/lib"
+          Copy-Item "$src/third_party/lib/*.lib" "$dst/third_party/lib"
 
       - name: SDK size
         run: |
@@ -337,7 +357,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.all) }}
     runs-on: ${{ matrix.platform.os }}
     env:
       PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
@@ -348,12 +368,35 @@ jobs:
         with:
           name: sdk-${{ matrix.platform.name }}
           path: _sdk
+      - uses: ./.github/actions/system-deps
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.platform.name }}-test
+      # The committed bindings must match what bindgen makes from this
+      # pjproject build. A new target's file is uploaded to commit.
+      - name: Bindings are current (Linux, macOS)
+        id: bindings
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo build -p pjsua-sys --features regen --locked
+          if [ -n "$(git status --porcelain crates/pjsua-sys/src/bindings)" ]; then
+            git status --short crates/pjsua-sys/src/bindings
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.bindings.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ matrix.platform.name }}
+          path: crates/pjsua-sys/src/bindings/${{ matrix.platform.target }}.rs
+      - if: steps.bindings.outputs.changed == 'true'
+        shell: bash
+        run: |
+          echo "::error::crates/pjsua-sys/src/bindings is out of date for ${{ matrix.platform.target }}; commit the uploaded bindings-${{ matrix.platform.name }} artifact"
+          exit 1
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
@@ -365,7 +408,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.list) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.all) }}
         profile: [debug, release]
     runs-on: ${{ matrix.platform.os }}
     env:
@@ -382,6 +425,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.platform.name }}-${{ matrix.profile }}
+      - uses: ./.github/actions/system-deps
       - name: Build
         shell: pwsh
         run: |
@@ -396,6 +440,12 @@ jobs:
           $bin = "target/${{ matrix.profile }}"
           New-Item -ItemType Directory -Force $env:DIST | Out-Null
           Copy-Item "$bin/rustone.exe", "$bin/rustone-cli.exe", "$bin/rustone.pdb", "$bin/rustone_cli.pdb", "$bin/*.dll" $env:DIST
+      - name: Collect binaries (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$DIST"
+          cp "target/${{ matrix.profile }}/rustone" "target/${{ matrix.profile }}/rustone-cli" "$DIST/"
       - uses: actions/upload-artifact@v7
         with:
           name: rustone-${{ matrix.platform.name }}-${{ matrix.profile }}
