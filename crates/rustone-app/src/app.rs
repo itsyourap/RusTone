@@ -180,6 +180,7 @@ impl App {
             missed_toast: None,
             message_toasts: std::collections::HashMap::new(),
             waker: waker.clone(),
+            #[allow(clippy::default_constructed_unit_structs, reason = "Taskbar is a unit struct only on some platforms")]
             taskbar: fastframe_dock::Taskbar::default(),
             secrets,
             power: fastframe_power::Power::spawn(move || power_wake.wake()),
@@ -970,6 +971,7 @@ impl Resident for App {
         if self.quit_requested { Closed::Quit } else { self.next }
     }
 
+    #[allow(clippy::default_constructed_unit_structs, reason = "Taskbar is a unit struct only on some platforms")]
     fn window_gone(&mut self) {
         // Video textures belonged to the old window.
         self.ui.video = crate::ui::video::VideoView::default();

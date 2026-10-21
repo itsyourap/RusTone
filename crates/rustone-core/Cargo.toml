@@ -22,3 +22,9 @@ unsafe_code = "forbid"
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }

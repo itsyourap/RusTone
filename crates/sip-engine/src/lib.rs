@@ -155,6 +155,7 @@ pub(crate) enum Message {
     /// A non-looping sound finished (from a media thread).
     PlayerEnded(i32),
     /// Windows reported a sound device change (from a COM thread).
+    #[cfg_attr(not(windows), expect(dead_code, reason = "hot-plug notifications exist only on Windows so far"))]
     DevicesChanged,
     /// The main account registered (from pjsua's callback).
     Registered,

@@ -1,5 +1,5 @@
-//! Passwords live in the OS credential store (Windows Credential Manager),
-//! never in settings.toml.
+//! Passwords live in the OS credential store (Windows Credential Manager,
+//! the macOS keychain, the Secret Service on Linux), never in settings.toml.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -18,13 +18,16 @@ pub struct Keyring {
 }
 
 impl Keyring {
-    /// Installs the platform store. Call once at startup.
+    /// Installs the platform store (Credential Manager, the macOS keychain,
+    /// or the Secret Service on Linux). Call once at startup.
     pub fn init(service: &str) -> Result<Self, String> {
         #[cfg(windows)]
-        keyring_core::set_default_store(windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?);
-        #[cfg(not(windows))]
-        return Err("no credential store on this platform yet (Phase 10)".into());
-        #[cfg(windows)]
+        let store = windows_native_keyring_store::Store::new();
+        #[cfg(target_os = "macos")]
+        let store = apple_native_keyring_store::keychain::Store::new();
+        #[cfg(target_os = "linux")]
+        let store = dbus_secret_service_keyring_store::Store::new();
+        keyring_core::set_default_store(store.map_err(|e| e.to_string())?);
         Ok(Self { service: service.to_owned() })
     }
 

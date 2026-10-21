@@ -5,6 +5,7 @@
 //! choose when another app has claimed a scheme).
 
 /// The link schemes RusTone handles.
+#[cfg_attr(not(windows), expect(dead_code, reason = "registration exists only on Windows so far"))]
 pub const SCHEMES: [&str; 3] = ["sip", "tel", "callto"];
 
 #[cfg(windows)]

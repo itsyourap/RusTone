@@ -9,5 +9,6 @@ rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/IGNORE:4286"]
 [env]
 PJPROJECT_DIR = { value = "../pjproject", relative = true, force = false }
 RUSTONE_DEPS_DIR = { value = "../../deps", relative = true, force = false }
-# Only needed when regenerating bindings (`--features pjsua-sys/regen`).
-LIBCLANG_PATH = { value = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\x64\bin', force = false }
+# Regenerating bindings (`--features pjsua-sys/regen`) needs libclang. On
+# Windows set LIBCLANG_PATH, e.g. to Visual Studio's `VC\Tools\Llvm\x64\bin`;
+# Linux and macOS find it themselves.
