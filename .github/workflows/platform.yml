@@ -481,7 +481,8 @@ jobs:
         if: matrix.profile == 'release' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo packager -p rustone-app --release -f nsis,wix -o $env:PACKAGES
+          # -v shows WiX's own output when it fails.
+          cargo packager -v -p rustone-app --release -f nsis,wix -o $env:PACKAGES
           if ($LASTEXITCODE) { throw "cargo packager failed" }
           if ($env:WINDOWS_CERTIFICATE) {
             ./packaging/windows/sign.ps1 (Get-ChildItem $env:PACKAGES -File -Include *.exe, *.msi -Recurse).FullName
