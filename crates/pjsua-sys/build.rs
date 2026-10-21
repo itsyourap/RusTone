@@ -172,6 +172,9 @@ mod unix {
                     println!("cargo:rustc-link-search=native={dir}");
                 }
             } else if let Some(name) = token.strip_prefix("-l") {
+                // pjproject asks for GNU's C++ library (for OpenH264);
+                // Apple's is libc++.
+                let name = if name == "stdc++" && env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("apple") { "c++" } else { name };
                 // pjproject's libraries (and its bundled third-party ones) are
                 // static archives in `lib_dir`; everything else is a system
                 // shared library.
