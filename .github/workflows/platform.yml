@@ -465,6 +465,18 @@ jobs:
         if: matrix.profile == 'release' && runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
         shell: pwsh
         run: ./packaging/windows/sign.ps1 target/release/rustone.exe, target/release/rustone-cli.exe
+      # cargo-packager downloads WiX 3.11, which can't build ARM64 MSIs; it
+      # uses a WiX already in its tools folder, so put 3.14.1 there.
+      - name: WiX 3.14 (Windows)
+        if: matrix.profile == 'release' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wix = "$env:LOCALAPPDATA/.cargo-packager/WixTools"
+          curl.exe -fsSL --retry 3 -o "$env:RUNNER_TEMP/wix314.zip" https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          $hash = (Get-FileHash "$env:RUNNER_TEMP/wix314.zip" -Algorithm SHA256).Hash
+          if ($hash -ne "6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31") { throw "unexpected WiX download ($hash)" }
+          Remove-Item -Recurse -Force $wix -ErrorAction SilentlyContinue
+          Expand-Archive "$env:RUNNER_TEMP/wix314.zip" $wix
       - name: Installers (Windows)
         if: matrix.profile == 'release' && runner.os == 'Windows'
         shell: pwsh
