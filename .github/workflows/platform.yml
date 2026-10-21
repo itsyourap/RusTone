@@ -193,7 +193,8 @@ jobs:
           cd "$src"
           if [ "$ARCH" = arm64 ]; then
             # The tarballs' config.guess/config.sub predate Windows on ARM.
-            cp /usr/share/automake-*/config.guess /usr/share/automake-*/config.sub .
+            automake=$(ls -d /usr/share/automake-* | sort -V | tail -1)
+            cp "$automake/config.guess" "$automake/config.sub" .
             export CC=clang CXX=clang++
           fi
           ./configure --prefix="$prefix" --enable-static --disable-shared
