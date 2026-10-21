@@ -4,11 +4,30 @@
 # Each platform runs its own chain (platform.yml: dependencies -> pjproject
 # -> test -> build and installers). The chains are independent: one
 # platform failing doesn't stop the others. Only the release needs them all.
+#
+# Only what a push changed is built (.github/scripts/changed-platforms.sh):
+# shared code builds every platform, platform-specific files only theirs,
+# and documentation nothing. Tags and new branches build all; a manual run
+# builds the platforms it's given.
 name: CI
 
 on:
   push:
+    # A push of only these doesn't start the workflow (path filters don't
+    # apply to tags).
+    paths-ignore:
+      - "**.md"
+      - LICENSE
+      - .gitignore
+      - .gitattributes
+  # Run by hand from the Actions tab, for every platform or one.
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build
+        type: choice
+        default: all
+        options: [all, windows-x64, linux-x64, macos-arm64]
 
 permissions:
   contents: read
@@ -22,27 +41,58 @@ jobs:
     name: platforms
     runs-on: ubuntu-24.04
     outputs:
-      all: ${{ steps.list.outputs.all }}
+      # The platforms this run builds.
+      build: ${{ steps.list.outputs.build }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Platforms the change needs
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+          CHOSEN: ${{ inputs.platforms }}
+        run: |
+          everything='["windows-x64","linux-x64","macos-arm64"]'
+          zero=0000000000000000000000000000000000000000
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$CHOSEN" ] && [ "$CHOSEN" != all ]; then
+            echo "manual run: building $CHOSEN"
+            names="[\"$CHOSEN\"]"
+          elif [ "$GITHUB_EVENT_NAME" != push ] || [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "$GITHUB_EVENT_NAME of $GITHUB_REF_NAME: building everything"
+            names=$everything
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "$zero" ] || ! git cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
+            echo "new branch or rewritten history: building everything"
+            names=$everything
+          else
+            git diff --name-only "$BEFORE" "$GITHUB_SHA" | tee /dev/stderr > changed.txt
+            names=$(bash .github/scripts/changed-platforms.sh < changed.txt)
+          fi
+          echo "building: $names"
+          echo "names=$names" >> "$GITHUB_OUTPUT"
       - id: list
         # name: artifact/cache suffix; os: runner image; target: Rust target;
         # source_deps: builds pjproject's dependencies from source.
+        env:
+          NAMES: ${{ steps.changed.outputs.names }}
         run: |
           all='[
             {"name": "windows-x64", "os": "windows-2025", "target": "x86_64-pc-windows-msvc", "source_deps": true},
             {"name": "linux-x64", "os": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu", "source_deps": false},
             {"name": "macos-arm64", "os": "macos-15", "target": "aarch64-apple-darwin", "source_deps": false}
           ]'
-          echo "all=$(jq -c . <<< "$all")" >> "$GITHUB_OUTPUT"
+          echo "build=$(jq -c --argjson names "$NAMES" 'map(select(.name as $n | $names | index($n)))' <<< "$all")" >> "$GITHUB_OUTPUT"
 
   platform:
     name: ${{ matrix.platform.name }}
     needs: platforms
+    # Nothing to build: the push changed only files no build uses.
+    if: needs.platforms.outputs.build != '[]'
     strategy:
       # Independent chains: a failing platform leaves the others running.
       fail-fast: false
       matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.all) }}
+        platform: ${{ fromJSON(needs.platforms.outputs.build) }}
     uses: ./.github/workflows/platform.yml
     with:
       name: ${{ matrix.platform.name }}

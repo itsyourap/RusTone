@@ -197,7 +197,7 @@ jobs:
           path: _sdk/pjproject
           # The fork's commit, our config_site.h, the build scripts and the
           # dependencies built above.
-          key: pjproject-${{ inputs.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '.github/scripts/*', '_sdk/deps/**') }}
+          key: pjproject-${{ inputs.name }}-${{ steps.pj.outputs.sha }}-${{ hashFiles('crates/pjsua-sys/config_site.h', '.github/scripts/build-pjproject.sh', '.github/scripts/linux-deps.sh', '.github/scripts/macos-deps.sh', '_sdk/deps/**') }}
 
       - name: System dependencies
         if: steps.cache.outputs.cache-hit != 'true'
