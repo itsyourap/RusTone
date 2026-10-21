@@ -2,7 +2,8 @@
 # (for version tags) drafts a GitHub Release with the installers.
 #
 # Each platform runs its own chain (platform.yml: dependencies -> pjproject
-# -> test -> build and installers). The chains are independent: one
+# -> test -> build and installers), called by a job of its own so the run's
+# graph shows one lane per platform. The chains are independent: one
 # platform failing doesn't stop the others. Only the release needs them all.
 #
 # Only what a push changed is built (.github/scripts/changed-platforms.sh):
@@ -41,8 +42,8 @@ jobs:
     name: platforms
     runs-on: ubuntu-24.04
     outputs:
-      # The platforms this run builds.
-      build: ${{ steps.list.outputs.build }}
+      # The platforms this run builds, e.g. ["linux-x64","linux-arm64"].
+      build: ${{ steps.changed.outputs.names }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -70,46 +71,58 @@ jobs:
           fi
           echo "building: $names"
           echo "names=$names" >> "$GITHUB_OUTPUT"
-      - id: list
-        # name: artifact/cache suffix; os: runner image; target: Rust target;
-        # arch: x64 or arm64; source_deps: builds pjproject's dependencies
-        # from source.
-        env:
-          NAMES: ${{ steps.changed.outputs.names }}
-        run: |
-          all='[
-            {"name": "windows-x64", "os": "windows-2025", "target": "x86_64-pc-windows-msvc", "arch": "x64", "source_deps": true},
-            {"name": "windows-arm64", "os": "windows-11-arm", "target": "aarch64-pc-windows-msvc", "arch": "arm64", "source_deps": true},
-            {"name": "linux-x64", "os": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu", "arch": "x64", "source_deps": false},
-            {"name": "linux-arm64", "os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu", "arch": "arm64", "source_deps": false},
-            {"name": "macos-arm64", "os": "macos-15", "target": "aarch64-apple-darwin", "arch": "arm64", "source_deps": false},
-            {"name": "macos-x64", "os": "macos-15-intel", "target": "x86_64-apple-darwin", "arch": "x64", "source_deps": false}
-          ]'
-          echo "build=$(jq -c --argjson names "$NAMES" 'map(select(.name as $n | $names | index($n)))' <<< "$all")" >> "$GITHUB_OUTPUT"
 
-  platform:
-    name: ${{ matrix.platform.name }}
+  # One job per platform (rather than a matrix, whose jobs a later job can
+  # only wait for all together). name: artifact/cache suffix; os: runner
+  # image; target: Rust target; source-deps: builds pjproject's
+  # dependencies from source.
+
+  windows-x64:
     needs: platforms
-    # Nothing to build: the push changed only files no build uses.
-    if: needs.platforms.outputs.build != '[]'
-    strategy:
-      # Independent chains: a failing platform leaves the others running.
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJSON(needs.platforms.outputs.build) }}
+    if: contains(needs.platforms.outputs.build, '"windows-x64"')
     uses: ./.github/workflows/platform.yml
-    with:
-      name: ${{ matrix.platform.name }}
-      os: ${{ matrix.platform.os }}
-      target: ${{ matrix.platform.target }}
-      arch: ${{ matrix.platform.arch }}
-      source-deps: ${{ matrix.platform.source_deps }}
+    with: { name: windows-x64, os: windows-2025, target: x86_64-pc-windows-msvc, arch: x64, source-deps: true }
+    secrets: inherit
+
+  windows-arm64:
+    needs: platforms
+    if: contains(needs.platforms.outputs.build, '"windows-arm64"')
+    uses: ./.github/workflows/platform.yml
+    with: { name: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, arch: arm64, source-deps: true }
+    secrets: inherit
+
+  linux-x64:
+    needs: platforms
+    if: contains(needs.platforms.outputs.build, '"linux-x64"')
+    uses: ./.github/workflows/platform.yml
+    with: { name: linux-x64, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, arch: x64 }
+    secrets: inherit
+
+  linux-arm64:
+    needs: platforms
+    if: contains(needs.platforms.outputs.build, '"linux-arm64"')
+    uses: ./.github/workflows/platform.yml
+    with: { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, arch: arm64 }
+    secrets: inherit
+
+  macos-arm64:
+    needs: platforms
+    if: contains(needs.platforms.outputs.build, '"macos-arm64"')
+    uses: ./.github/workflows/platform.yml
+    with: { name: macos-arm64, os: macos-15, target: aarch64-apple-darwin, arch: arm64 }
+    secrets: inherit
+
+  macos-x64:
+    needs: platforms
+    if: contains(needs.platforms.outputs.build, '"macos-x64"')
+    uses: ./.github/workflows/platform.yml
+    with: { name: macos-x64, os: macos-15-intel, target: x86_64-apple-darwin, arch: x64 }
     secrets: inherit
 
   release:
     name: release
     # Every platform's installers, so a failing chain blocks the release.
-    needs: platform
+    needs: [windows-x64, windows-arm64, linux-x64, linux-arm64, macos-arm64, macos-x64]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
