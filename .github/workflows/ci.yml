@@ -391,7 +391,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.platform.name }}
-          path: crates/pjsua-sys/src/bindings/${{ matrix.platform.target }}.rs
+          path: crates/pjsua-sys/src/bindings/
+          if-no-files-found: error
       - if: steps.bindings.outputs.changed == 'true'
         shell: bash
         run: |
