@@ -338,7 +338,8 @@ jobs:
       PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
       RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
       DIST: dist/rustone-${{ inputs.name }}-${{ matrix.profile }}
-      PACKAGES: dist/packages
+      # Absolute: cargo-packager runs in the crate's folder.
+      PACKAGES: ${{ github.workspace }}/dist/packages
       # Optional signing: packages are signed only when these secrets exist.
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -447,6 +448,7 @@ jobs:
         shell: bash
         run: |
           strip -S target/release/rustone target/release/rustone-cli
+          bash packaging/macos/icns.sh
           cargo packager -p rustone-app --release -f app -o "$PACKAGES"
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustone-app") | .version')
           dmg="$PACKAGES/RusTone_${version}_aarch64.dmg"

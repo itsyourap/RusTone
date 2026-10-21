@@ -23,7 +23,8 @@ license-file = "../../LICENSE"
 description = "Universal SIP softphone"
 homepage = "https://github.com/itsyourap/RusTone"
 category = "Business"
-icons = ["../../packaging/icons/*.png", "../../packaging/icons/rustone.ico"]
+# rustone.icns is made on macOS from the PNGs (packaging/macos/icns.sh).
+icons = ["../../packaging/icons/*.png", "../../packaging/icons/rustone.ico", "../../packaging/icons/*.icns"]
 # The runtime DLLs next to rustone.exe on Windows (nothing matches elsewhere).
 resources = ["../../target/release/*.dll"]
 # sip:/tel:/callto: links: Windows installers register them (as the

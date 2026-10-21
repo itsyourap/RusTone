@@ -13,18 +13,20 @@ matching the crate version, attaches them to a draft GitHub Release.
 
 ## Building locally
 
-Build the release binaries first, then (`cargo install cargo-packager --locked`):
+Build the release binaries first, then (`cargo install cargo-packager --locked`). The output
+folder must be absolute: cargo-packager runs in the crate's folder.
 
 ```sh
-# Windows
-cargo packager -p rustone-app --release -f nsis,wix -o dist/packages
+# Windows (PowerShell)
+cargo packager -p rustone-app --release -f nsis,wix -o $PWD/dist/packages
 
 # Linux (strip first: the release profile keeps debug info)
 strip target/release/rustone
-APPIMAGE_EXTRACT_AND_RUN=1 cargo packager -p rustone-app --release -f deb,appimage -o dist/packages
+APPIMAGE_EXTRACT_AND_RUN=1 cargo packager -p rustone-app --release -f deb,appimage -o "$PWD/dist/packages"
 
 # macOS
-cargo packager -p rustone-app --release -f app -o dist/packages
+bash packaging/macos/icns.sh
+cargo packager -p rustone-app --release -f app -o "$PWD/dist/packages"
 bash packaging/macos/bundle.sh dist/packages/RusTone.app dist/packages/RusTone.dmg
 ```
 
@@ -35,6 +37,7 @@ bash packaging/macos/bundle.sh dist/packages/RusTone.app dist/packages/RusTone.d
 * `linux/rustone.desktop`: the desktop entry template (categories, link schemes).
 * `macos/Info.plist`: merged into the generated one (microphone and camera usage texts).
 * `macos/entitlements.plist`: hardened-runtime entitlements for signed builds.
+* `macos/icns.sh`: makes `icons/rustone.icns` from the PNGs (`iconutil`).
 * `macos/bundle.sh`: bundles the libraries, signs, and makes the `.dmg`.
 * `windows/sign.ps1`: Authenticode signing with `signtool`.
 

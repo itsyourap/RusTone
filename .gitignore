@@ -4,3 +4,6 @@
 # Local test configs and logs (contain credentials / phone numbers)
 rustone-cli.toml
 *.log
+
+# Made on macOS when packaging (packaging/macos/icns.sh)
+/packaging/icons/*.icns
