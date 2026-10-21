@@ -14,7 +14,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Targets with committed bindings in `src/bindings/<target>.rs`.
-const TARGETS: &[&str] = &["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "aarch64-apple-darwin"];
+const TARGETS: &[&str] = &[
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+];
 
 /// What the shim and bindgen compile against, and what to link.
 struct Pj {
@@ -72,7 +79,13 @@ fn dir_from_env(var: &str) -> PathBuf {
 mod windows {
     use super::*;
 
-    const PJ_LIB: &str = "libpjproject-x86_64-x64-vc14-Release-Static";
+    /// pjproject's MSVC library: `libpjproject-<cpu>-<platform>-vc14-<configuration>`.
+    fn pj_lib() -> &'static str {
+        match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+            Ok("aarch64") => "libpjproject-ARM64-ARM64-vc14-Release-Static",
+            _ => "libpjproject-x86_64-x64-vc14-Release-Static",
+        }
+    }
 
     /// Libraries that pjproject needs and doesn't already request with
     /// `#pragma comment(lib, ...)`.
@@ -82,14 +95,18 @@ mod windows {
     ];
 
     /// DLLs the linked pjproject imports (dumpbin /dependents): SDL2 for
-    /// video windows and OpenSSL for TLS/SRTP. OpenH264 and AMR are linked
-    /// statically.
-    const RUNTIME_DLLS: &[&str] = &["SDL2.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll"];
+    /// video windows and OpenSSL for TLS/SRTP, whose names carry the
+    /// architecture. OpenH264 and AMR are linked statically.
+    fn runtime_dlls() -> [String; 3] {
+        let arch = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") { "arm64" } else { "x64" };
+        ["SDL2.dll".into(), format!("libcrypto-3-{arch}.dll"), format!("libssl-3-{arch}.dll")]
+    }
 
     pub fn setup(pj_dir: &Path) -> Pj {
         let deps_dir = dir_from_env("RUSTONE_DEPS_DIR");
         let pj_lib_dir = pj_dir.join("lib");
-        println!("cargo:rerun-if-changed={}", pj_lib_dir.join(format!("{PJ_LIB}.lib")).display());
+        let pj_lib = pj_lib();
+        println!("cargo:rerun-if-changed={}", pj_lib_dir.join(format!("{pj_lib}.lib")).display());
 
         // pjproject objects carry `#pragma comment(lib, ...)` directives for
         // OpenSSL, OpenH264, SDL2, etc., which link.exe resolves from these
@@ -97,7 +114,7 @@ mod windows {
         for dir in [pj_lib_dir, pj_dir.join("third_party").join("lib"), deps_dir.join("lib")] {
             println!("cargo:rustc-link-search=native={}", dir.display());
         }
-        println!("cargo:rustc-link-lib=static={PJ_LIB}");
+        println!("cargo:rustc-link-lib=static={pj_lib}");
         for lib in SYSTEM_LIBS {
             println!("cargo:rustc-link-lib=dylib={lib}");
         }
@@ -116,7 +133,7 @@ mod windows {
         // OUT_DIR is target/<profile>/build/pjsua-sys-<hash>/out.
         let out = PathBuf::from(env::var("OUT_DIR").unwrap());
         let Some(profile_dir) = out.ancestors().nth(3) else { return };
-        for name in RUNTIME_DLLS {
+        for name in &runtime_dlls() {
             let Some(src) = ["bin", "lib"].iter().map(|d| deps_dir.join(d).join(name)).find(|p| p.is_file()) else {
                 println!("cargo:warning={name} not found in {}\\{{bin,lib}}", deps_dir.display());
                 continue;

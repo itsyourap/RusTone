@@ -9,6 +9,9 @@
 #   build      debug and release binaries; the release build also makes the
 #              installers (NSIS + MSI, .deb + AppImage, .dmg)
 #
+# Platforms: Windows, Linux and macOS, each on x64 and ARM64, built natively
+# on runners of that architecture.
+#
 # Linux and macOS take the dependencies from apt/Homebrew instead
 # (.github/actions/system-deps).
 name: Platform
@@ -26,6 +29,10 @@ on:
         required: true
       target:
         description: Rust target triple
+        type: string
+        required: true
+      arch:
+        description: x64 or arm64
         type: string
         required: true
       source-deps:
@@ -60,6 +67,7 @@ jobs:
     env:
       DEP: ${{ matrix.dep }}
       DEP_VERSION: ${{ matrix.version }}
+      ARCH: ${{ inputs.arch }}
     steps:
       - uses: actions/checkout@v7
       - id: cache
@@ -68,8 +76,15 @@ jobs:
           path: _dep
           key: dep-${{ inputs.name }}-${{ matrix.dep }}-${{ matrix.version }}
 
-      - name: SDL2 (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'sdl2'
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && (matrix.dep == 'openh264' || (matrix.dep == 'sdl2' && inputs.arch == 'arm64'))
+        uses: ./.github/actions/msvc
+
+      # x64: SDL's own Visual C++ build. ARM64 has none, so it's built from
+      # the same release with CMake: a DLL with the static CRT, as
+      # mmozeiko/build-sdl2 builds it.
+      - name: SDL2 (Windows x64)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'sdl2' && inputs.arch == 'x64'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin, _build | Out-Null
@@ -79,58 +94,92 @@ jobs:
           Copy-Item "$sdl/include/*" _dep/include
           Copy-Item "$sdl/lib/x64/*.lib" _dep/lib
           Copy-Item "$sdl/lib/x64/SDL2.dll" _dep/bin
+      - name: SDL2 with CMake (Windows ARM64)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'sdl2' && inputs.arch == 'arm64'
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch "release-$env:DEP_VERSION" https://github.com/libsdl-org/SDL _build/SDL
+          cmake -S _build/SDL -B _build/SDL-build -A ARM64 -Wno-dev `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
+            -DBUILD_SHARED_LIBS=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF
+          if ($LASTEXITCODE) { throw "cmake configure failed" }
+          cmake --build _build/SDL-build --config Release --parallel
+          if ($LASTEXITCODE) { throw "cmake build failed" }
+          cmake --install _build/SDL-build --config Release --prefix _build/SDL-install
+          if ($LASTEXITCODE) { throw "cmake install failed" }
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin | Out-Null
+          # pjproject includes <SDL.h>, so the headers go in include/ itself.
+          Copy-Item _build/SDL-install/include/SDL2/* _dep/include
+          Copy-Item _build/SDL-install/lib/SDL2.lib, _build/SDL-install/lib/SDL2main.lib _dep/lib
+          Copy-Item _build/SDL-install/bin/SDL2.dll _dep/bin
 
       - name: OpenSSL with vcpkg (Windows)
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openssl'
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows-release
+          # Release-only DLLs: x64-windows-release is a vcpkg community
+          # triplet, the ARM64 one is ours (.github/vcpkg-triplets).
+          $triplet = "$env:ARCH-windows-release"
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "openssl:$triplet" --overlay-triplets=.github/vcpkg-triplets
           if ($LASTEXITCODE) { throw "vcpkg failed" }
-          $ssl = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-release"
+          $ssl = "$env:VCPKG_INSTALLATION_ROOT/installed/$triplet"
           New-Item -ItemType Directory -Force _dep/include, _dep/lib, _dep/bin | Out-Null
           Copy-Item -Recurse "$ssl/include/openssl" _dep/include
           Copy-Item "$ssl/lib/libcrypto.lib", "$ssl/lib/libssl.lib" _dep/lib
-          Copy-Item "$ssl/bin/libcrypto-3-x64.dll", "$ssl/bin/libssl-3-x64.dll" _dep/bin
+          Copy-Item "$ssl/bin/libcrypto-3-$env:ARCH.dll", "$ssl/bin/libssl-3-$env:ARCH.dll" _dep/bin
 
-      - name: Set up MSVC
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264'
-        uses: ./.github/actions/msvc
-      - name: Set up NASM (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264'
+      # x64: meson with NASM. ARM64: vcpkg's port, whose meson build handles
+      # the ARM assembly (armasm64); static with the static CRT, as pjproject
+      # and RusTone link it.
+      - name: Set up NASM (Windows x64)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264' && inputs.arch == 'x64'
         shell: pwsh
         run: |
           choco install nasm --no-progress -y
           if ($LASTEXITCODE) { throw "choco install nasm failed" }
           "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
-      - name: OpenH264 with meson
-        if: steps.cache.outputs.cache-hit != 'true' && matrix.dep == 'openh264'
+      - name: OpenH264 with meson (Windows x64)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264' && inputs.arch == 'x64'
         shell: pwsh
         run: |
           pip install meson ninja
           git clone --depth 1 --branch "v$env:DEP_VERSION" https://github.com/cisco/openh264 _build/openh264
-          $extra = @()
-          if ($IsWindows) { $extra += "-Db_vscrt=mt" }
           meson setup _build/openh264-build _build/openh264 "--prefix=$PWD/_dep" --libdir=lib --buildtype=release `
-            -Ddefault_library=static -Dtests=disabled @extra
+            -Ddefault_library=static -Dtests=disabled -Db_vscrt=mt
           if ($LASTEXITCODE) { throw "meson setup failed" }
           meson install -C _build/openh264-build
           if ($LASTEXITCODE) { throw "meson install failed" }
           # pjproject links "openh264.lib"; meson names static libraries lib*.a.
-          if ($IsWindows) { Move-Item -Force _dep/lib/libopenh264.a _dep/lib/openh264.lib }
+          Move-Item -Force _dep/lib/libopenh264.a _dep/lib/openh264.lib
+      - name: OpenH264 with vcpkg (Windows ARM64)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && matrix.dep == 'openh264' && inputs.arch == 'arm64'
+        shell: pwsh
+        run: |
+          $triplet = "arm64-windows-static-release"
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "openh264:$triplet"
+          if ($LASTEXITCODE) { throw "vcpkg failed" }
+          $h264 = "$env:VCPKG_INSTALLATION_ROOT/installed/$triplet"
+          New-Item -ItemType Directory -Force _dep/include, _dep/lib | Out-Null
+          Copy-Item -Recurse "$h264/include/wels" _dep/include
+          # pjproject links "openh264.lib", whatever vcpkg named it.
+          $lib = Get-ChildItem "$h264/lib" -File | Where-Object Name -Match '^(lib)?openh264\.(lib|a)$' | Select-Object -First 1
+          if (-not $lib) { Get-ChildItem "$h264/lib"; throw "no OpenH264 library in $h264/lib" }
+          Copy-Item $lib.FullName _dep/lib/openh264.lib
 
-      # pjproject's MSVC build links the GCC-built static AMR libraries
-      # (PJMEDIA_OPENCORE_AMR_BUILT_WITH_GCC); UCRT64 matches MSVC's CRT.
+      # pjproject's MSVC build links static AMR libraries built with a MinGW
+      # toolchain (PJMEDIA_OPENCORE_AMR_BUILT_WITH_GCC): GCC on UCRT64 for
+      # x64, clang on CLANGARM64 for ARM64; both use MSVC's CRT (UCRT).
       - name: Set up MSYS2 (Windows)
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && (matrix.dep == 'opencore-amr' || matrix.dep == 'vo-amrwbenc')
         uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: ${{ inputs.arch == 'arm64' && 'CLANGARM64' || 'UCRT64' }}
           update: false
           # Only runs when the library isn't cached; both AMR jobs would also
           # race to save the same package cache.
           cache: false
-          install: make curl tar
-          pacboy: gcc:p
+          install: make curl tar autotools
+          pacboy: ${{ inputs.arch == 'arm64' && 'clang:p' || 'gcc:p' }}
       - name: ${{ matrix.dep }} with MSYS2 (Windows)
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows' && (matrix.dep == 'opencore-amr' || matrix.dep == 'vo-amrwbenc')
         shell: msys2 {0}
@@ -142,15 +191,21 @@ jobs:
           curl -fsSL --retry 3 -o "$src.tar.gz" "https://downloads.sourceforge.net/project/opencore-amr/$DEP/$src.tar.gz"
           tar xzf "$src.tar.gz"
           cd "$src"
+          if [ "$ARCH" = arm64 ]; then
+            # The tarballs' config.guess/config.sub predate Windows on ARM.
+            cp /usr/share/automake-*/config.guess /usr/share/automake-*/config.sub .
+            export CC=clang CXX=clang++
+          fi
           ./configure --prefix="$prefix" --enable-static --disable-shared
           make -j4
           make install
           # GCC calls ___chkstk_ms for large stack frames; MSVC's linker can't
           # find it, so add libgcc's object to the archive that needs it
           # (https://docs.pjsip.org/en/latest/specific-guides/audio/opencore-amr.html#windows).
-          ar x "$(gcc -print-libgcc-file-name)" _chkstk_ms.o
+          # clang on ARM64 calls __chkstk, which MSVC's CRT provides.
           for lib in "$prefix"/lib/*.a; do
             if nm "$lib" 2>/dev/null | grep -q "U ___chkstk_ms"; then
+              [ -f _chkstk_ms.o ] || ar x "$(gcc -print-libgcc-file-name)" _chkstk_ms.o
               echo "adding _chkstk_ms.o to $(basename "$lib")"
               ar q "$lib" _chkstk_ms.o
             fi
@@ -171,6 +226,8 @@ jobs:
     # Runs after the dependencies, or without them where there are none.
     if: ${{ !cancelled() && (needs.deps.result == 'success' || needs.deps.result == 'skipped') }}
     runs-on: ${{ inputs.os }}
+    env:
+      ARCH: ${{ inputs.arch }}
     defaults:
       run:
         shell: pwsh
@@ -228,7 +285,8 @@ jobs:
             </ItemDefinitionGroup>
           </Project>
           "@ | Set-Content _build/pjproject/Directory.Build.props
-          msbuild _build/pjproject/pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /m /v:minimal
+          $platform = if ($env:ARCH -eq "arm64") { "ARM64" } else { "x64" }
+          msbuild _build/pjproject/pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=$platform /m /v:minimal
           if ($LASTEXITCODE) { throw "msbuild failed" }
 
       - name: Build and install (Linux, macOS)
@@ -299,11 +357,11 @@ jobs:
         run: cargo fetch --locked
       # The committed bindings must match what bindgen makes from this
       # pjproject build. A new target's file is uploaded to commit.
-      - name: Bindings are current (Linux, macOS)
+      - name: Bindings are current
         id: bindings
-        if: runner.os != 'Windows'
         shell: bash
         run: |
+          if [ "$RUNNER_OS" = Windows ]; then export LIBCLANG_PATH="C:/Program Files/LLVM/bin"; fi
           cargo build -p pjsua-sys --features regen --locked
           if [ -n "$(git status --porcelain crates/pjsua-sys/src/bindings)" ]; then
             git status --short crates/pjsua-sys/src/bindings
@@ -451,7 +509,7 @@ jobs:
           bash packaging/macos/icns.sh
           cargo packager -p rustone-app --release -f app -o "$PACKAGES"
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustone-app") | .version')
-          dmg="$PACKAGES/RusTone_${version}_aarch64.dmg"
+          dmg="$PACKAGES/RusTone_${version}_$([ "${{ inputs.arch }}" = arm64 ] && echo aarch64 || echo x64).dmg"
           bash packaging/macos/bundle.sh "$PACKAGES/RusTone.app" "$dmg"
           if [ -n "$APPLE_ID" ] && [ -n "$MACOS_SIGNING_IDENTITY" ]; then
             xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait

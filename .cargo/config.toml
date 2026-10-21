@@ -5,6 +5,9 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/IGNORE:4286"]
 
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/IGNORE:4286"]
+
 # Defaults for local builds. Override them by setting the variables in the environment.
 [env]
 PJPROJECT_DIR = { value = "../pjproject", relative = true, force = false }

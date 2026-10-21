@@ -15,10 +15,16 @@
 mod ffi {
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     include!("bindings/x86_64_pc_windows_msvc.rs");
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    include!("bindings/aarch64_pc_windows_msvc.rs");
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     include!("bindings/x86_64_unknown_linux_gnu.rs");
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    include!("bindings/aarch64_unknown_linux_gnu.rs");
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     include!("bindings/aarch64_apple_darwin.rs");
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    include!("bindings/x86_64_apple_darwin.rs");
 }
 
 pub use ffi::*;
