@@ -1,0 +1,12 @@
+[package]
+name = "rustone-mac"
+description = "macOS-only shell integration for RusTone that needs unsafe Objective-C and LaunchServices calls (link handling)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The objc2 versions fastframe uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSAppleEventManager", "NSAppleEventDescriptor", "NSBundle", "NSString"] }

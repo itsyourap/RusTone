@@ -13,7 +13,6 @@ mod config;
 pub mod debug;
 mod event;
 mod message;
-#[cfg(windows)]
 mod hotplug;
 mod pj;
 mod presence;
@@ -154,8 +153,7 @@ pub(crate) enum Message {
     Command(Box<Command>),
     /// A non-looping sound finished (from a media thread).
     PlayerEnded(i32),
-    /// Windows reported a sound device change (from a COM thread).
-    #[cfg_attr(not(windows), expect(dead_code, reason = "hot-plug notifications exist only on Windows so far"))]
+    /// The OS reported a sound device change (from the watcher's thread).
     DevicesChanged,
     /// The main account registered (from pjsua's callback).
     Registered,
@@ -267,7 +265,6 @@ const QUALITY_INTERVAL: Duration = Duration::from_secs(1);
 
 fn run(mut config: EngineConfig, sink: Sink, rx: Receiver<Message>, tx: Sender<Message>, meters: Arc<Meters>) {
     pj::install_sink(sink.clone());
-    #[cfg(windows)]
     let _watcher = {
         let tx = tx.clone();
         hotplug::DeviceWatcher::start(move || {

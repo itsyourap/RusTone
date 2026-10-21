@@ -4275,6 +4275,7 @@ dependencies = [
  "resvg",
  "rfd",
  "rustone-core",
+ "rustone-mac",
  "rustone-win",
  "sip-engine",
  "ureq",
@@ -4310,6 +4311,14 @@ dependencies = [
  "serde_json",
  "toml 0.9.12+spec-1.1.0",
  "windows-native-keyring-store",
+]
+
+[[package]]
+name = "rustone-mac"
+version = "0.1.0"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

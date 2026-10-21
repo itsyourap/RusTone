@@ -37,7 +37,9 @@ pub fn native_options(app: &App) -> eframe::NativeOptions {
     fastframe_titlebar::set_enabled(app.settings.ui.custom_titlebar);
     let viewport = egui::ViewportBuilder::default()
         .with_title("RusTone")
-        .with_app_id("rustone")
+        // Wayland/X11: must match the installed desktop entry
+        // (dev.itsyourap.rustone.desktop) for the dock icon and grouping.
+        .with_app_id(crate::DESKTOP_ID)
         .with_icon(crate::icons::window_icon())
         .with_inner_size(rustone_core::settings::DEFAULT_WINDOW_SIZE)
         .with_min_inner_size([340.0, 520.0])

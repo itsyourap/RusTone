@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pjsua-sys", "crates/sip-engine", "crates/rustone-core", "crates/rustone-win", "crates/rustone-app", "crates/rustone-cli"]
+members = ["crates/pjsua-sys", "crates/sip-engine", "crates/rustone-core", "crates/rustone-win", "crates/rustone-mac", "crates/rustone-app", "crates/rustone-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ pjsua-sys = { path = "crates/pjsua-sys" }
 rustone-core = { path = "crates/rustone-core" }
 sip-engine = { path = "crates/sip-engine" }
 rustone-win = { path = "crates/rustone-win" }
+rustone-mac = { path = "crates/rustone-mac" }
 
 egui = "0.36.1"
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "accesskit", "default_fonts", "wayland", "x11"] }

@@ -38,6 +38,7 @@ impl MediaKeys {
     /// Starts the controls; call on the main thread.
     pub fn start(wake: impl Fn() + Send + Sync + 'static) -> Self {
         let mut app = MediaApp::new("rustone", "RusTone");
+        app.desktop_entry = crate::DESKTOP_ID.to_owned();
         app.can_quit = false;
         Self { controls: NowPlaying::start(app, wake), shown: None }
     }
