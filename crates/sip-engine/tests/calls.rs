@@ -73,6 +73,7 @@ fn wav(name: &str, pcm: &[i16]) -> std::path::PathBuf {
 }
 
 #[test]
+#[cfg_attr(target_os = "macos", ignore = "pjproject's macOS video devices need the main run loop, which the test harness does not run")]
 fn call_to_self_over_the_local_account() {
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig { local_account: true, null_audio: true, audio_codecs: vec!["PCMU/8000/1".into()], ..EngineConfig::default() };

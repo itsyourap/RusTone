@@ -19,6 +19,7 @@ fn wait_for(rx: &mpsc::Receiver<Event>, timeout: Duration, what: &str, mut want:
 }
 
 #[test]
+#[cfg_attr(target_os = "macos", ignore = "pjproject's macOS video devices need the main run loop, which the test harness does not run")]
 fn engine_lifecycle() {
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig { local_account: true, ..EngineConfig::default() };

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use sip_engine::{AccountConfig, Command, Engine, EngineConfig, Event, PresenceState};
 
 #[test]
+#[cfg_attr(target_os = "macos", ignore = "pjproject's macOS video devices need the main run loop, which the test harness does not run")]
 fn watching_our_own_presence() {
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig { local_account: true, null_audio: true, ..EngineConfig::default() };

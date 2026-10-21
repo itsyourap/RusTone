@@ -245,10 +245,45 @@ impl Drop for Engine {
     fn drop(&mut self) {
         let _ = self.tx.send(Message::Shutdown);
         if let Some(thread) = self.thread.take() {
+            #[cfg(target_os = "macos")]
+            main_loop::run_until_finished(&thread);
             let _ = thread.join();
         }
         pj::debug::set_feed(None);
         pj::set_video_frames(None);
+    }
+}
+
+/// pjproject's macOS video devices (SDL's window jobs, AVFoundation capture)
+/// run work synchronously on the main thread, so the main thread must keep
+/// its run loop going whenever pjsua may need it, including while pjsua
+/// shuts down. Waiting for the engine thread on the main thread therefore
+/// runs the loop instead of blocking.
+#[cfg(target_os = "macos")]
+mod main_loop {
+    use std::ffi::{c_int, c_void};
+    use std::thread::JoinHandle;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+        fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source_handled: u8) -> i32;
+    }
+
+    unsafe extern "C" {
+        fn pthread_main_np() -> c_int;
+    }
+
+    pub fn run_until_finished(thread: &JoinHandle<()>) {
+        // SAFETY: a plain query of the calling thread.
+        if unsafe { pthread_main_np() } == 0 {
+            return;
+        }
+        while !thread.is_finished() {
+            // SAFETY: runs the current (main) thread's run loop briefly,
+            // in the default mode, which handles main-queue work.
+            unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, 1) };
+        }
     }
 }
 
