@@ -54,8 +54,8 @@ mod imp {
     use std::ffi::c_void;
 
     use objc2::rc::Retained;
-    use objc2::runtime::NSObject;
-    use objc2::{AllocAnyThread, define_class, msg_send, sel};
+    use objc2::runtime::{AnyObject, NSObject};
+    use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send, sel};
     use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager, NSBundle, NSString};
 
     type Handler = Box<dyn Fn(String) + Send>;
@@ -87,11 +87,12 @@ mod imp {
         // SAFETY: NSObject's designated initialiser.
         let handler: Retained<UrlHandler> = unsafe { msg_send![super(handler), init] };
         let manager = NSAppleEventManager::sharedAppleEventManager();
+        let object: &AnyObject = handler.as_ref();
         // SAFETY: the selector matches `handle_get_url`'s signature; the
         // handler is kept alive for the rest of the process below, since the
         // event manager doesn't retain it.
         unsafe {
-            manager.setEventHandler_andSelector_forEventClass_andEventID(&handler, sel!(handleGetURLEvent:withReplyEvent:), GET_URL, GET_URL);
+            manager.setEventHandler_andSelector_forEventClass_andEventID(object, sel!(handleGetURLEvent:withReplyEvent:), GET_URL, GET_URL);
         }
         std::mem::forget(handler);
     }
