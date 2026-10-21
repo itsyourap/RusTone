@@ -6,7 +6,9 @@
 #                                  that build their dependencies from source)
 #     -> pjproject                (cached per fork commit)
 #       -> test
-#         -> build (debug, release)
+#         -> build (debug, release; the release build also makes the
+#            installers: NSIS + MSI, .deb + AppImage, .dmg)
+#           -> release (version tags only: a draft GitHub Release)
 # Linux and macOS take the dependencies from apt/Homebrew instead
 # (.github/actions/system-deps).
 name: CI
@@ -30,6 +32,7 @@ env:
   OPENH264_VERSION: 2.6.0
   # Bump to rebuild OpenSSL (vcpkg's current 3.x).
   OPENSSL_CACHE: v1
+  CARGO_PACKAGER_VERSION: 0.11.8
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -416,6 +419,16 @@ jobs:
       PJPROJECT_DIR: ${{ github.workspace }}/_sdk/pjproject
       RUSTONE_DEPS_DIR: ${{ github.workspace }}/_sdk/deps
       DIST: dist/rustone-${{ matrix.platform.name }}-${{ matrix.profile }}
+      PACKAGES: dist/packages
+      # Optional signing: packages are signed only when these secrets exist.
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -451,3 +464,108 @@ jobs:
         with:
           name: rustone-${{ matrix.platform.name }}-${{ matrix.profile }}
           path: ${{ env.DIST }}
+
+      # ------------------------------------------------ installers (release) --
+      - name: Install cargo-packager
+        if: matrix.profile == 'release'
+        shell: bash
+        run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
+
+      - name: Set up MSVC (Windows signing)
+        if: matrix.profile == 'release' && runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        uses: ./.github/actions/msvc
+      - name: Sign the binaries (Windows)
+        if: matrix.profile == 'release' && runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: ./packaging/windows/sign.ps1 target/release/rustone.exe, target/release/rustone-cli.exe
+      - name: Installers (Windows)
+        if: matrix.profile == 'release' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo packager -p rustone-app --release -f nsis,wix -o $env:PACKAGES
+          if ($LASTEXITCODE) { throw "cargo packager failed" }
+          if ($env:WINDOWS_CERTIFICATE) {
+            ./packaging/windows/sign.ps1 (Get-ChildItem $env:PACKAGES -File -Include *.exe, *.msi -Recurse).FullName
+          }
+
+      - name: Installers (Linux)
+        if: matrix.profile == 'release' && runner.os == 'Linux'
+        shell: bash
+        env:
+          # linuxdeploy is an AppImage; the runner has no FUSE for it.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          sudo apt-get install -y -q --no-install-recommends file squashfs-tools
+          # The installed program needs no debug info (the build artifact
+          # above keeps it).
+          strip target/release/rustone target/release/rustone-cli
+          cargo packager -p rustone-app --release -f deb,appimage -o "$PACKAGES"
+
+      - name: Signing keychain (macOS)
+        if: matrix.profile == 'release' && runner.os == 'macOS' && env.MACOS_CERTIFICATE != ''
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+      - name: Installers (macOS)
+        if: matrix.profile == 'release' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          strip -S target/release/rustone target/release/rustone-cli
+          cargo packager -p rustone-app --release -f app -o "$PACKAGES"
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustone-app") | .version')
+          dmg="$PACKAGES/RusTone_${version}_aarch64.dmg"
+          bash packaging/macos/bundle.sh "$PACKAGES/RusTone.app" "$dmg"
+          if [ -n "$APPLE_ID" ] && [ -n "$MACOS_SIGNING_IDENTITY" ]; then
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$dmg"
+          fi
+          # The .dmg carries the app; don't upload the bundle on its own.
+          rm -rf "$PACKAGES/RusTone.app"
+
+      - name: Upload the installers
+        if: matrix.profile == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ matrix.platform.name }}
+          # cargo-packager keeps its downloaded tools in .cargo-packager.
+          path: |
+            ${{ env.PACKAGES }}/*
+            !${{ env.PACKAGES }}/.cargo-packager
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag matches the version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustone-app") | .version')
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match the version $version in Cargo.toml"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-*
+          path: release
+          merge-multiple: true
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la release
+          gh release create "$GITHUB_REF_NAME" release/* --draft --generate-notes --title "RusTone ${GITHUB_REF_NAME#v}"

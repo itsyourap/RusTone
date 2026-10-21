@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+GenericName=Softphone
+Comment={{comment}}
+Exec={{exec}} %U
+Icon={{icon}}
+Terminal=false
+Categories=Network;Telephony;
+Keywords=SIP;VoIP;phone;call;softphone;
+MimeType=x-scheme-handler/sip;x-scheme-handler/tel;x-scheme-handler/callto;
+StartupWMClass=rustone

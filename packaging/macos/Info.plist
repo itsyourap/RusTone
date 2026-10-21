@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged over the Info.plist cargo-packager generates (bundle id, version,
+     executable, icon and the sip:/tel:/callto: URL types). -->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>RusTone uses the microphone for calls.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>RusTone uses the camera for video calls.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>RusTone talks to SIP servers and phones on your local network.</string>
+	<key>CFBundleDisplayName</key>
+	<string>RusTone</string>
+</dict>
+</plist>
