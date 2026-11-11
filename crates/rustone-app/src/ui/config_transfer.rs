@@ -110,17 +110,22 @@ fn idle(ui: &mut Ui, app: &mut App, p: &Palette) {
     }
 }
 
-/// One account's checkbox row: its name, server and user.
+/// One account's checkbox row: its name, then its user and server. Both
+/// are cut short with "…" rather than widening the card past its column.
 fn account_check(ui: &mut Ui, p: &Palette, checked: &mut bool, title: &str, detail: &str) {
     ui.horizontal(|ui| {
-        ui.checkbox(checked, egui::RichText::new(title).size(13.5).color(p.text));
-        ui.label(egui::RichText::new(detail).size(12.0).color(p.dim));
+        ui.checkbox(checked, "").on_hover_text(title);
+        let name = ui.add(egui::Label::new(egui::RichText::new(title).size(13.5).color(p.text)).truncate().sense(egui::Sense::click()));
+        if name.clicked() {
+            *checked = !*checked;
+        }
+        ui.add(egui::Label::new(egui::RichText::new(detail).size(12.0).color(p.dim)).truncate()).on_hover_text(detail);
     });
 }
 
 fn export(ui: &mut Ui, app: &mut App, p: &Palette) {
     let Transfer::Export { selected } = &mut app.ui.transfer.mode else { return };
-    ui.label(egui::RichText::new("Export the settings and these accounts:").size(13.0).color(p.secondary));
+    widgets::note(ui, egui::RichText::new("Export the settings and these accounts:").size(13.0).color(p.secondary));
     if app.settings.accounts.is_empty() {
         widgets::note(ui, egui::RichText::new("No accounts: the settings only.").size(12.0).color(p.dim));
     }
@@ -168,7 +173,7 @@ fn export(ui: &mut Ui, app: &mut App, p: &Palette) {
 
 fn import(ui: &mut Ui, app: &mut App, p: &Palette) {
     let Transfer::Import { path, file, selected } = &mut app.ui.transfer.mode else { return };
-    ui.label(egui::RichText::new(format!("Import {}", file_name(path))).size(13.0).color(p.secondary));
+    widgets::note(ui, egui::RichText::new(format!("Import {}", file_name(path))).size(13.0).color(p.secondary));
     if !file.exported_by.is_empty() {
         widgets::note(ui, egui::RichText::new(format!("Exported by {}", file.exported_by)).size(12.0).color(p.dim));
     }
@@ -210,5 +215,26 @@ fn import(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
         let what = if count == 0 { "settings".to_owned() } else { format!("settings and {count} account{}", if count == 1 { "" } else { "s" }) };
         app.ui.transfer = TransferState { mode: Transfer::Idle, status: Some((format!("Imported {what} from {name}."), false)) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A long address is cut short instead of widening the card past its
+    /// column (the narrowest column is 300 points).
+    #[test]
+    fn account_rows_fit_a_narrow_column() {
+        let width = std::rc::Rc::new(std::cell::Cell::new(0.0f32));
+        let seen = width.clone();
+        let harness = crate::ui::test_support::harness([300.0, 80.0], false, move |ui, checked| {
+            let row = ui.scope(|ui| {
+                account_check(ui, &Palette::dark(), checked, "A rather long account name", "+910000000000@a.very.long.ims.domain.example.test · sip.example.test");
+            });
+            seen.set(row.response.rect.width());
+        });
+        assert!(width.get() <= 300.0, "row is {} wide", width.get());
+        drop(harness);
     }
 }
