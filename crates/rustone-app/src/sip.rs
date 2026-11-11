@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fastframe_shell::Waker;
-use rustone_core::account::{Account, LocalAccount, SrtpMode, Transport};
+use rustone_core::account::{Account, IpVersion, LocalAccount, SrtpMode, Transport};
 use rustone_core::settings::{AudioSettings, Settings, split_list};
 use sip_engine::debug::{DebugFeed, LogSource};
 use sip_engine::{AccountConfig, AudioDevice, AudioDevices, CallOptions, Levels, Meters, Command, Engine, EngineConfig, Event, LocalAccountConfig, RegState, Srtp};
@@ -368,6 +368,7 @@ pub fn engine_config(settings: &Settings, log_file: &std::path::Path) -> EngineC
         rtp_port_max: sip.rtp_port_max,
         stun_servers: if sip.enable_stun { split_list(&sip.stun) } else { Vec::new() },
         nameservers: if sip.dns_srv { split_list(&sip.dns_srv_ns) } else { Vec::new() },
+        ipv6: settings.active().is_some_and(|a| a.ip_version.uses_ipv6()),
         audio_codecs: sip.audio_codecs.split_whitespace().map(str::to_owned).collect(),
         vad: sip.vad,
         ec: sip.ec,
@@ -396,6 +397,12 @@ pub fn account_config(a: &Account, _sip: &rustone_core::settings::SipSettings) -
             Transport::Udp => sip_engine::Transport::Udp,
             Transport::Tcp => sip_engine::Transport::Tcp,
             Transport::Tls => sip_engine::Transport::Tls,
+        },
+        ip_version: match a.ip_version {
+            IpVersion::Ipv4 => sip_engine::IpVersion::Ipv4,
+            IpVersion::PreferIpv4 => sip_engine::IpVersion::PreferIpv4,
+            IpVersion::PreferIpv6 => sip_engine::IpVersion::PreferIpv6,
+            IpVersion::Ipv6 => sip_engine::IpVersion::Ipv6,
         },
         srtp: match a.srtp {
             SrtpMode::Disabled => Srtp::Disabled,
@@ -470,6 +477,7 @@ mod tests {
         settings.features.video = false;
         let c = engine_config(&settings, log);
         assert!(!c.video.enabled);
+        assert!(!c.ipv6, "no account uses IPv6");
         assert_eq!(c.stun_servers, ["a", "b"]);
         assert_eq!(c.nameservers, ["8.8.8.8"]);
         assert!(c.local_account);
@@ -484,6 +492,7 @@ mod tests {
             username: "+910000000000@sip.example.com".into(),
             password: "pw".into(),
             transport: Transport::Tls,
+            ip_version: IpVersion::PreferIpv6,
             voicemail_number: "*86".into(),
             ..Account::default()
         };
@@ -491,6 +500,7 @@ mod tests {
         assert_eq!(c.server, "sip.example.com");
         assert_eq!(c.proxies, ["192.168.29.1:5068"]);
         assert_eq!(c.transport, sip_engine::Transport::Tls);
+        assert_eq!(c.ip_version, sip_engine::IpVersion::PreferIpv6);
         assert!(c.mwi);
         assert_eq!(c.password, "pw");
     }

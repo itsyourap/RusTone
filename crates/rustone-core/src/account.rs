@@ -22,6 +22,26 @@ pub enum SrtpMode {
     DtlsSdes,
 }
 
+/// Which IP versions an account reaches its server over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IpVersion {
+    #[default]
+    Ipv4,
+    /// IPv4 addresses first, then IPv6 ones.
+    PreferIpv4,
+    /// IPv6 addresses first, then IPv4 ones.
+    PreferIpv6,
+    Ipv6,
+}
+
+impl IpVersion {
+    /// Whether the account may use IPv6.
+    pub fn uses_ipv6(self) -> bool {
+        self != Self::Ipv4
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Account {
@@ -52,6 +72,9 @@ pub struct Account {
     pub voicemail_number: String,
     pub srtp: SrtpMode,
     pub transport: Transport,
+    /// The IP versions of the server addresses it uses, and of its Contact
+    /// and media.
+    pub ip_version: IpVersion,
     /// Public address to advertise when STUN is off.
     pub public_addr: String,
     /// Registration expiry, seconds.
@@ -83,6 +106,7 @@ impl Default for Account {
             voicemail_number: String::new(),
             srtp: SrtpMode::Disabled,
             transport: Transport::Udp,
+            ip_version: IpVersion::Ipv4,
             public_addr: String::new(),
             register_refresh: 300,
             keep_alive: 15,
@@ -179,9 +203,11 @@ mod tests {
 
     #[test]
     fn enums_use_kebab_case() {
-        let a: Account = toml::from_str("transport = \"tls\"\nsrtp = \"dtls-sdes\"").unwrap();
+        let a: Account = toml::from_str("transport = \"tls\"\nsrtp = \"dtls-sdes\"\nip_version = \"prefer-ipv6\"").unwrap();
         assert_eq!(a.transport, Transport::Tls);
         assert_eq!(a.srtp, SrtpMode::DtlsSdes);
+        assert_eq!(a.ip_version, IpVersion::PreferIpv6);
+        assert_eq!(Account::default().ip_version, IpVersion::Ipv4);
     }
 
     #[test]

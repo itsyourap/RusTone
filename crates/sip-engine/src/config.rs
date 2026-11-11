@@ -18,8 +18,11 @@ pub struct EngineConfig {
     pub rtp_port_max: u16,
     /// STUN servers; empty disables STUN.
     pub stun_servers: Vec<String>,
-    /// DNS servers for SRV lookups; empty uses the system resolver.
+    /// DNS servers (IP addresses) for SRV, A and AAAA lookups; empty uses
+    /// the system resolver, which looks up A and AAAA records only.
     pub nameservers: Vec<String>,
+    /// Also create IPv6 transports, for an account that uses IPv6.
+    pub ipv6: bool,
     /// Enabled audio codecs in priority order, e.g. `AMR-WB/16000/1`.
     pub audio_codecs: Vec<String>,
     /// Voice activity detection.
@@ -47,6 +50,7 @@ impl Default for EngineConfig {
             rtp_port_max: 0,
             stun_servers: Vec::new(),
             nameservers: Vec::new(),
+            ipv6: false,
             audio_codecs: vec!["PCMA/8000/1".into(), "PCMU/8000/1".into()],
             vad: false,
             ec: true,
@@ -105,6 +109,18 @@ pub enum Transport {
     Tls,
 }
 
+/// The IP versions an account uses for signalling and media.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IpVersion {
+    #[default]
+    Ipv4,
+    /// IPv4 addresses first, then IPv6 ones.
+    PreferIpv4,
+    /// IPv6 addresses first, then IPv4 ones.
+    PreferIpv6,
+    Ipv6,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Srtp {
     #[default]
@@ -132,6 +148,7 @@ pub struct AccountConfig {
     pub auth_id: String,
     pub display_name: String,
     pub transport: Transport,
+    pub ip_version: IpVersion,
     pub srtp: Srtp,
     /// Public address for SDP/Contact when STUN is off.
     pub public_addr: String,
@@ -163,6 +180,7 @@ impl Default for AccountConfig {
             auth_id: String::new(),
             display_name: String::new(),
             transport: Transport::Udp,
+            ip_version: IpVersion::Ipv4,
             srtp: Srtp::Disabled,
             public_addr: String::new(),
             register_refresh: 300,

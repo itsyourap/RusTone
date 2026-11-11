@@ -2,7 +2,7 @@
 
 use egui::{Sense, Ui, Vec2, vec2};
 use fastframe_fonts::Weight;
-use rustone_core::account::{Account, SrtpMode, Transport};
+use rustone_core::account::{Account, IpVersion, SrtpMode, Transport};
 
 use super::widgets::{self, card, section_title, setting_row};
 use crate::app::App;
@@ -160,6 +160,16 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
             ui.label(egui::RichText::new("Transport").size(12.0).color(p.secondary));
             widgets::segmented(ui, p, &mut a.transport, &[(Transport::Udp, None, "UDP"), (Transport::Tcp, None, "TCP"), (Transport::Tls, Some(Icon::Lock), "TLS")]);
             ui.add_space(4.0);
+            ui.label(egui::RichText::new("IP version").size(12.0).color(p.secondary));
+            egui::ComboBox::from_id_salt("ip-version")
+                .width(ui.available_width())
+                .selected_text(ip_version_label(a.ip_version))
+                .show_ui(ui, |ui| {
+                    for version in [IpVersion::Ipv4, IpVersion::PreferIpv4, IpVersion::PreferIpv6, IpVersion::Ipv6] {
+                        ui.selectable_value(&mut a.ip_version, version, ip_version_label(version));
+                    }
+                });
+            ui.add_space(4.0);
             ui.label(egui::RichText::new("Media encryption (SRTP)").size(12.0).color(p.secondary));
             egui::ComboBox::from_id_salt("srtp")
                 .width(ui.available_width())
@@ -233,6 +243,15 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
 
     if !close {
         app.ui.account_draft = Some(draft);
+    }
+}
+
+fn ip_version_label(version: IpVersion) -> &'static str {
+    match version {
+        IpVersion::Ipv4 => "IPv4",
+        IpVersion::PreferIpv4 => "IPv4, then IPv6",
+        IpVersion::PreferIpv6 => "IPv6, then IPv4",
+        IpVersion::Ipv6 => "IPv6",
     }
 }
 

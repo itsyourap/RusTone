@@ -27,7 +27,7 @@ use util::{Arena, check, error_text, pj_default, pj_to_string, with_acc_info};
 
 use crate::audio::{AudioDevice, AudioDevices, DeviceIds};
 use crate::call::{CallId, CodecInfo, DtmfMethod, Sound};
-use crate::config::{AccountConfig, EngineConfig, LocalAccountConfig, Srtp, Transport};
+use crate::config::{AccountConfig, EngineConfig, IpVersion, LocalAccountConfig, Srtp, Transport};
 use crate::{Event, RegState, Sink};
 use calls::ToneKey;
 
@@ -226,6 +226,13 @@ impl Session {
         if self.udp == PJSUA_INVALID_ID {
             log::warn!("no UDP transport");
         }
+        if cfg.ipv6 {
+            for kind in [PJSIP_TRANSPORT_UDP6, PJSIP_TRANSPORT_TCP6, PJSIP_TRANSPORT_TLS6] {
+                if let Err(e) = create_transport(kind, 0) {
+                    log::warn!("{e}");
+                }
+            }
+        }
     }
 
     /// Disables every codec, then enables the configured ones with
@@ -387,7 +394,20 @@ impl Session {
             ac.vid_wnd_flags = video::WND_BORDER | video::WND_RESIZABLE;
         }
         ac.mwi_enabled = a.mwi.into();
-        if a.transport == Transport::Udp && self.udp != PJSUA_INVALID_ID {
+        // Which of the server's addresses pjsua tries (pjsua's transport
+        // selector filters and orders them), and the Contact's and media's
+        // IP version. pjsua's own default is dual-stack.
+        let ipv6 = match a.ip_version {
+            IpVersion::Ipv4 => PJSUA_IPV6_DISABLED,
+            IpVersion::PreferIpv4 => PJSUA_IPV6_ENABLED_PREFER_IPV4,
+            IpVersion::PreferIpv6 => PJSUA_IPV6_ENABLED_PREFER_IPV6,
+            IpVersion::Ipv6 => PJSUA_IPV6_ENABLED_USE_IPV6_ONLY,
+        };
+        ac.ipv6_sip_use = ipv6;
+        ac.ipv6_media_use = ipv6;
+        // UDP over IPv4 keeps to our UDP transport (and its source port);
+        // with IPv6, pjsua picks the transport for the server's address.
+        if a.transport == Transport::Udp && a.ip_version == IpVersion::Ipv4 && self.udp != PJSUA_INVALID_ID {
             ac.transport_id = self.udp;
         }
     }
