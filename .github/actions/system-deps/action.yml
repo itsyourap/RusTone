@@ -21,6 +21,13 @@ runs:
       with:
         path: ${{ runner.temp }}/apt-archives
         key: apt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/linux-deps.sh') }}
+    # The runners' default Ubuntu mirror can be very slow: switch to the
+    # fastest healthy one first (it handles 24.04's ubuntu.sources and keeps
+    # arm64 on ubuntu-ports). Pinned to v1.4.5's commit. If it fails, apt
+    # carries on with the default mirror.
+    - if: runner.os == 'Linux'
+      continue-on-error: true
+      uses: vegardit/fast-apt-mirror.sh@806c59276adfff2df420124ad5e4587f018c358a # v1.4.5
     - if: runner.os == 'Linux'
       shell: bash
       env:
