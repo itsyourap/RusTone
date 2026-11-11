@@ -1,8 +1,10 @@
 //! The debug window: a second native window with a vertical navigation
 //! rail and live views of RusTone's internals (logs, SIP messages, RTP
-//! streams, audio). It opens from Settings, the tray, or Ctrl+Shift+D.
+//! streams, audio, DNS lookups). It opens from Settings, the tray, or
+//! Ctrl+Shift+D.
 
 mod audio;
+mod dns;
 mod logs;
 mod media;
 mod overview;
@@ -30,10 +32,11 @@ pub enum Section {
     Sip,
     Media,
     Audio,
+    Dns,
 }
 
 impl Section {
-    const ALL: [Section; 5] = [Self::Overview, Self::Logs, Self::Sip, Self::Media, Self::Audio];
+    const ALL: [Section; 6] = [Self::Overview, Self::Logs, Self::Sip, Self::Media, Self::Audio, Self::Dns];
 
     fn icon(self) -> Icon {
         match self {
@@ -42,6 +45,7 @@ impl Section {
             Self::Sip => Icon::Network,
             Self::Media => Icon::Activity,
             Self::Audio => Icon::Waveform,
+            Self::Dns => Icon::Search,
         }
     }
 
@@ -52,6 +56,7 @@ impl Section {
             Self::Sip => "SIP messages",
             Self::Media => "RTP streams",
             Self::Audio => "Audio",
+            Self::Dns => "DNS lookup",
         }
     }
 }
@@ -65,6 +70,7 @@ pub struct DebugState {
     pub sip: sip::SipState,
     pub media: media::MediaState,
     pub audio: audio::AudioState,
+    pub dns: dns::DnsState,
 }
 
 /// Opens or closes the debug window (and the engine's extra collection).
@@ -73,6 +79,12 @@ pub fn set_open(app: &mut App, open: bool) {
         app.debug.open = open;
         app.sip.send(sip_engine::Command::SetDebug(open));
     }
+}
+
+/// Opens the debug window on `section`.
+pub fn show_section(app: &mut App, section: Section) {
+    set_open(app, true);
+    app.debug.section = section;
 }
 
 /// Shows the debug window while it's open. Called every frame of the main window.
@@ -122,6 +134,7 @@ fn draw(ui: &mut Ui, app: &mut App, p: &Palette) {
             Section::Sip => sip::show(ui, app, p),
             Section::Media => media::show(ui, app, p),
             Section::Audio => audio::show(ui, app, p),
+            Section::Dns => dns::show(ui, app, p),
         });
 }
 

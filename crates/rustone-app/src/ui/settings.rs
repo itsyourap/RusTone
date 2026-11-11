@@ -3,7 +3,6 @@
 //! fits without scrolling; and the account editor.
 
 use egui::Ui;
-use rustone_core::account::IpVersion;
 use rustone_core::settings::{AutoAnswerWhen, DenyIncoming, DtmfMethod, ThemePreference};
 
 use super::widgets::{self, card, section_title, setting_row, setting_stack};
@@ -69,96 +68,10 @@ fn network(ui: &mut Ui, app: &mut App, p: &Palette) {
             (false, false) => format!("{} looks up A and AAAA records.", used.join(", ")),
         };
         ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
-        ui.separator();
-        dns_lookup(ui, app, p);
-    });
-}
-
-/// The Network section's lookup of the active account's server: what it
-/// finds, and whether it's running.
-#[derive(Debug, Default)]
-pub struct DnsLookup {
-    running: Option<std::sync::mpsc::Receiver<crate::dns_discovery::Discovery>>,
-    /// The host looked up and what was found.
-    result: Option<(String, crate::dns_discovery::Discovery)>,
-}
-
-/// "Look up": the active account's server through NAPTR, SRV, A and AAAA
-/// records, with the DNS servers above or the system's.
-fn dns_lookup(ui: &mut Ui, app: &mut App, p: &Palette) {
-    let account = app.settings.active().map(|a| {
-        let server = if a.server.trim().is_empty() { &a.domain } else { &a.server };
-        (crate::dns_discovery::host_of(server).to_owned(), a.transport, a.ip_version)
-    });
-    let lookup = &mut app.ui.dns_lookup;
-    if let Some(rx) = &lookup.running
-        && let Ok(found) = rx.try_recv()
-    {
-        lookup.running = None;
-        let host = account.as_ref().map(|a| a.0.clone()).unwrap_or_default();
-        lookup.result = Some((host, found));
-    }
-    let running = lookup.running.is_some();
-    let description = match &account {
-        Some((host, _, _)) if !host.is_empty() => format!("Find {host}'s SIP servers: NAPTR, SRV, then AAAA and A records"),
-        _ => "Add an account to look up its server".to_owned(),
-    };
-    setting_row(ui, p, "Look up the server", Some(&description), |ui| {
-        let enabled = !running && account.as_ref().is_some_and(|a| !a.0.is_empty());
-        if ui.add_enabled(enabled, egui::Button::new(if running { "Looking…" } else { "Look up" })).clicked()
-            && let Some((host, transport, _)) = account.clone()
-        {
-            let configured: Vec<std::net::IpAddr> = app.settings.sip.dns_servers().iter().filter_map(|s| s.parse().ok()).collect();
-            let servers = if configured.is_empty() { crate::dns::system_dns_servers().iter().filter_map(|s| s.parse().ok()).collect() } else { configured };
-            let (tx, rx) = std::sync::mpsc::channel();
-            let ctx = ui.ctx().clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::dns_discovery::discover(&host, transport, &servers));
-                ctx.request_repaint();
-            });
-            app.ui.dns_lookup.running = Some(rx);
+        if ui.link(egui::RichText::new("Look up the account's server in the debug window").size(12.0)).clicked() {
+            crate::ui::debug::show_section(app, crate::ui::debug::Section::Dns);
         }
     });
-    if running {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
-    }
-    // pjsua's Contact takes the preferred IP version, not the server's.
-    let prefers_ipv4 = account.as_ref().is_some_and(|a| matches!(a.2, IpVersion::Ipv4 | IpVersion::PreferIpv4));
-    if let Some((host, found)) = &app.ui.dns_lookup.result {
-        lookup_results(ui, p, host, found, prefers_ipv4);
-    }
-}
-
-/// What a lookup found, query by query; `prefers_ipv4` is whether the
-/// account's IP version puts IPv4 first (or uses it only).
-fn lookup_results(ui: &mut Ui, p: &Palette, host: &str, found: &crate::dns_discovery::Discovery, prefers_ipv4: bool) {
-    let mono = |text: String, color| egui::RichText::new(text).monospace().size(11.5).color(color);
-    ui.label(egui::RichText::new(format!("{host}, asking {}", if found.servers.is_empty() { "nobody".to_owned() } else { found.servers.join(", ") })).size(12.0).color(p.secondary));
-    // A P-CSCF can have a dozen addresses: the first few, and a count.
-    const SHOWN: usize = 4;
-    let more = |n: usize| mono(format!("  … and {n} more"), p.dim);
-    for step in &found.steps {
-        ui.label(mono(step.query.clone(), p.text));
-        for answer in step.answers.iter().take(SHOWN) {
-            ui.label(mono(format!("  {answer}"), if step.failed { p.danger } else { p.dim }));
-        }
-        if step.answers.len() > SHOWN {
-            ui.label(more(step.answers.len() - SHOWN));
-        }
-    }
-    for endpoint in found.endpoints.iter().take(SHOWN) {
-        ui.label(mono(format!("→ {endpoint}"), p.success));
-    }
-    if found.endpoints.len() > SHOWN {
-        ui.label(more(found.endpoints.len() - SHOWN));
-    }
-    let mut notes = found.notes.clone();
-    if prefers_ipv4 && !found.endpoints.is_empty() && found.endpoints.iter().all(|e| e.starts_with('[')) {
-        notes.push("Only IPv6 addresses: set the account's IP version to IPv6 (or IPv6, then IPv4), so its Contact and media use IPv6 too.".into());
-    }
-    for note in notes {
-        ui.label(egui::RichText::new(note).size(12.0).color(p.warning));
-    }
 }
 
 fn calls(ui: &mut Ui, app: &mut App, p: &Palette) {
@@ -1115,35 +1028,6 @@ mod tests {
         assert_eq!(layout.columns, vec![vec![Section::Calls, Section::SpeedDial], vec![Section::AutoAnswer, Section::Forwarding]]);
         layout.place(&[Section::Calls, Section::AutoAnswer], 1);
         assert_eq!(layout.columns, vec![vec![Section::Calls, Section::AutoAnswer]]);
-    }
-
-    #[test]
-    fn lookup_results_show_the_chain() {
-        use crate::dns_discovery::{Discovery, Step};
-        use egui_kittest::kittest::Queryable;
-        let step = |query: &str, answers: &[&str]| Step { query: query.into(), answers: answers.iter().map(|a| (*a).to_owned()).collect(), failed: false };
-        let aaaa: Vec<String> = (1..=6).map(|i| format!("2001:db8::{i}")).collect();
-        let aaaa: Vec<&str> = aaaa.iter().map(String::as_str).collect();
-        let found = Discovery {
-            servers: vec!["192.168.29.1".into()],
-            steps: vec![
-                step("NAPTR ims.example", &["10 0 \"s\" \"SIPS+D2T\" _sips._tcp.ims.example.  (TLS)"]),
-                step("SRV _sips._tcp.ims.example", &["10 50 5061 pcscf.ims.example."]),
-                step("AAAA pcscf.ims.example", &aaaa),
-            ],
-            endpoints: vec!["[2001:db8::1]:5061".into()],
-            notes: Vec::new(),
-        };
-        let harness = crate::ui::test_support::harness([420.0, 600.0], (), move |ui, _| {
-            lookup_results(ui, &Palette::dark(), "ims.example", &found, true);
-        });
-        harness.get_by_label("ims.example, asking 192.168.29.1");
-        harness.get_by_label("SRV _sips._tcp.ims.example");
-        harness.get_by_label("  10 50 5061 pcscf.ims.example.");
-        harness.get_by_label("  2001:db8::4");
-        harness.get_by_label("  … and 2 more");
-        harness.get_by_label("→ [2001:db8::1]:5061");
-        harness.get_by_label("Only IPv6 addresses: set the account's IP version to IPv6 (or IPv6, then IPv4), so its Contact and media use IPv6 too.");
     }
 
     #[test]
