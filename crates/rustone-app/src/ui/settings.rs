@@ -3,6 +3,7 @@
 //! fits without scrolling; and the account editor.
 
 use egui::Ui;
+use rustone_core::account::IpVersion;
 use rustone_core::settings::{AutoAnswerWhen, DenyIncoming, DtmfMethod, ThemePreference};
 
 use super::widgets::{self, card, section_title, setting_row, setting_stack};
@@ -121,15 +122,16 @@ fn dns_lookup(ui: &mut Ui, app: &mut App, p: &Palette) {
     if running {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
     }
-    let ipv4 = account.as_ref().is_some_and(|a| !a.2.uses_ipv6());
+    // pjsua's Contact takes the preferred IP version, not the server's.
+    let prefers_ipv4 = account.as_ref().is_some_and(|a| matches!(a.2, IpVersion::Ipv4 | IpVersion::PreferIpv4));
     if let Some((host, found)) = &app.ui.dns_lookup.result {
-        lookup_results(ui, p, host, found, ipv4);
+        lookup_results(ui, p, host, found, prefers_ipv4);
     }
 }
 
-/// What a lookup found, query by query; `ipv4` is whether the account
-/// uses IPv4 only.
-fn lookup_results(ui: &mut Ui, p: &Palette, host: &str, found: &crate::dns_discovery::Discovery, ipv4: bool) {
+/// What a lookup found, query by query; `prefers_ipv4` is whether the
+/// account's IP version puts IPv4 first (or uses it only).
+fn lookup_results(ui: &mut Ui, p: &Palette, host: &str, found: &crate::dns_discovery::Discovery, prefers_ipv4: bool) {
     let mono = |text: String, color| egui::RichText::new(text).monospace().size(11.5).color(color);
     ui.label(egui::RichText::new(format!("{host}, asking {}", if found.servers.is_empty() { "nobody".to_owned() } else { found.servers.join(", ") })).size(12.0).color(p.secondary));
     // A P-CSCF can have a dozen addresses: the first few, and a count.
@@ -151,8 +153,8 @@ fn lookup_results(ui: &mut Ui, p: &Palette, host: &str, found: &crate::dns_disco
         ui.label(more(found.endpoints.len() - SHOWN));
     }
     let mut notes = found.notes.clone();
-    if ipv4 && !found.endpoints.is_empty() && found.endpoints.iter().all(|e| e.starts_with('[')) {
-        notes.push("Only IPv6 addresses: set the account's IP version to use IPv6.".into());
+    if prefers_ipv4 && !found.endpoints.is_empty() && found.endpoints.iter().all(|e| e.starts_with('[')) {
+        notes.push("Only IPv6 addresses: set the account's IP version to IPv6 (or IPv6, then IPv4), so its Contact and media use IPv6 too.".into());
     }
     for note in notes {
         ui.label(egui::RichText::new(note).size(12.0).color(p.warning));
@@ -1141,7 +1143,7 @@ mod tests {
         harness.get_by_label("  2001:db8::4");
         harness.get_by_label("  … and 2 more");
         harness.get_by_label("→ [2001:db8::1]:5061");
-        harness.get_by_label("Only IPv6 addresses: set the account's IP version to use IPv6.");
+        harness.get_by_label("Only IPv6 addresses: set the account's IP version to IPv6 (or IPv6, then IPv4), so its Contact and media use IPv6 too.");
     }
 
     #[test]
