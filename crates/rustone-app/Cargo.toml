@@ -60,7 +60,13 @@ depends = [
 [package.metadata.packager.appimage]
 # AppImages don't install dependencies: linuxdeploy bundles the shared
 # libraries the binary links; these are loaded at run time instead.
-libs = ["libxkbcommon.so.0", "libxkbcommon-x11.so.0", "libwayland-client.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1", "libXcursor.so.1", "libXi.so.6", "libXrandr.so.2"]
+libs = ["libxkbcommon.so.0", "libxkbcommon-x11.so.0", "libXcursor.so.1", "libXi.so.6", "libXrandr.so.2"]
+# Wayland's libraries come from the system, like libEGL: the system's Mesa
+# EGL driver is built against them, and an older bundled copy stops it
+# loading (newer Mesa needs symbols such as wl_fixes_interface), so no
+# window opens. SDL2 and libdecor link them, so exclude them from
+# linuxdeploy as well.
+excluded-libraries = ["libwayland-client.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1"]
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"
