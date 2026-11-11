@@ -25,3 +25,8 @@
 // IPv6 transports, media and nameservers, and AAAA records in DNS SRV
 // lookups (an account chooses its IP version; IPv4 by default).
 #define PJ_HAS_IPV6 1
+// DNS answers up to 1232 bytes over UDP, advertised with EDNS0 (the fork's
+// resolver adds the OPT record when this is over 512): a P-CSCF's dozen
+// AAAA records don't fit in 512, and some servers answer such a query
+// without EDNS0 with an empty, truncated response.
+#define PJ_DNS_RESOLVER_MAX_UDP_SIZE 1232
