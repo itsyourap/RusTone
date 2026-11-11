@@ -78,7 +78,10 @@ conversations.
 ### Accounts and security
 
 - SIP over UDP, TCP or TLS, with SRTP (SDES, DTLS) for encrypted media
-- STUN and ICE for NAT traversal, outbound proxies and DNS SRV
+- IPv4, IPv6 or both, chosen per account, for signalling and media
+- Your own DNS servers (your router's, say) and DNS SRV lookups, with a built-in lookup that
+  follows NAPTR, SRV, AAAA and A records to show which servers an account will reach
+- STUN and ICE for NAT traversal, and outbound proxies
 - Passwords are kept in the operating system's credential store (Windows Credential Manager, macOS Keychain, the Secret Service on Linux), never in a file
 - A local "call by IP" account for direct calls without a server
 
