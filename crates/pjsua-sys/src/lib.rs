@@ -123,6 +123,15 @@ pub mod shim {
         /// Unregisters it (before pjsua_destroy).
         pub fn jf_msg_tap_remove();
 
+        /// Registers the custom headers module (after pjsua_init).
+        pub fn jf_headers_install() -> pj_status_t;
+        /// Unregisters it and frees its rules (before pjsua_destroy).
+        pub fn jf_headers_remove();
+        /// Replaces the custom header rules, one per line,
+        /// `METHODS\tNAME\tVALUE\n` (`*` for every method, an empty value
+        /// removes the header), for requests whose From host is `from_host`.
+        pub fn jf_headers_set(from_host: *const c_char, rules: *const c_char) -> pj_status_t;
+
         /// Statistics of the call's first audio stream.
         pub fn jf_call_stream_snapshot(call_id: pjsua_call_id, out: *mut StreamSnapshot) -> pj_status_t;
         pub fn jf_sizeof_jf_stream_snapshot() -> usize;

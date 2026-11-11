@@ -6,6 +6,7 @@ pub mod command;
 pub mod contacts;
 pub mod dialplan;
 pub mod directory;
+pub mod headers;
 pub mod hid;
 pub mod history;
 pub mod hooks;

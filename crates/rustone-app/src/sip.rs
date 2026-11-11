@@ -422,9 +422,22 @@ pub fn account_config(a: &Account, sip: &rustone_core::settings::SipSettings) ->
         allow_rewrite: a.allow_rewrite,
         disable_session_timer: a.disable_session_timer,
         initial_auth: a.initial_auth,
+        number_uri: a.number_uri.trim().to_owned(),
+        headers: header_rules(a),
         mwi: !a.voicemail_number.trim().is_empty(),
         hide_cid: a.hide_cid,
     }
+}
+
+/// The account's header rules with `{user}` and `{domain}` filled in;
+/// lines that aren't rules are left out (the editor shows why).
+fn header_rules(a: &Account) -> Vec<sip_engine::HeaderRule> {
+    let domain = if a.domain.trim().is_empty() { crate::dns_discovery::host_of(&a.server) } else { a.domain.trim() };
+    let (rules, _) = rustone_core::headers::parse(&a.headers);
+    rules
+        .into_iter()
+        .map(|r| sip_engine::HeaderRule { methods: r.methods, name: r.name, value: rustone_core::headers::fill(&r.value, a.number(), domain) })
+        .collect()
 }
 
 fn call_options(settings: &Settings) -> CallOptions {
@@ -509,6 +522,7 @@ mod tests {
         assert_eq!(c.transport, sip_engine::Transport::Tls);
         assert_eq!(c.ip_version, sip_engine::IpVersion::PreferIpv6);
         assert!(c.initial_auth);
+        assert!(c.headers.is_empty() && c.number_uri.is_empty());
         assert!(c.mwi);
         assert_eq!(c.password, "pw");
         // Own DNS servers without SRV: explicit ports.
@@ -518,6 +532,21 @@ mod tests {
         assert_eq!(c.proxies, ["192.168.29.1:5068"]);
         sip.dns_srv = true;
         assert_eq!(account_config(&a, &sip).server, "sip.example.com");
+    }
+
+    #[test]
+    fn templates_and_headers_fill_in() {
+        let sip = rustone_core::settings::SipSettings::default();
+        let a = Account {
+            domain: "ims.example".into(),
+            username: "+910000000000".into(),
+            number_uri: " sip:{number};phone-context={domain}@{domain};user=phone ".into(),
+            headers: "[INVITE] P-Preferred-Identity: <sip:{user}@{domain}>\nnot a rule\n".into(),
+            ..Account::default()
+        };
+        let c = account_config(&a, &sip);
+        assert_eq!(c.number_uri, "sip:{number};phone-context={domain}@{domain};user=phone");
+        assert_eq!(c.headers, [sip_engine::HeaderRule { methods: vec!["INVITE".into()], name: "P-Preferred-Identity".into(), value: "<sip:+910000000000@ims.example>".into() }]);
     }
 
     #[test]

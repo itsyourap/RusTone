@@ -57,6 +57,7 @@ fn build_shim(pj: &Pj) {
         .file("shim/jf_shim.c")
         .file("shim/jf_debug.c")
         .file("shim/jf_video.c")
+        .file("shim/jf_headers.c")
         .includes(&pj.includes)
         .define("NDEBUG", None)
         .static_crt(true)

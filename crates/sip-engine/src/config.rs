@@ -109,6 +109,15 @@ pub enum Transport {
     Tls,
 }
 
+/// A header the account's requests get (or lose, with an empty value).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HeaderRule {
+    /// Methods it applies to; empty for every request.
+    pub methods: Vec<String>,
+    pub name: String,
+    pub value: String,
+}
+
 /// The IP versions an account uses for signalling and media.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IpVersion {
@@ -165,6 +174,12 @@ pub struct AccountConfig {
     /// Send an empty Authorization header before the first challenge
     /// (pjsua's `auth_pref.initial_auth`), for IMS registrars.
     pub initial_auth: bool,
+    /// What dialled numbers become, `{number}` and `{domain}` filled in
+    /// (e.g. `sip:{number};phone-context={domain}@{domain};user=phone`);
+    /// empty for `sip:{number}@{domain}`.
+    pub number_uri: String,
+    /// Headers added to, changed in or removed from the account's requests.
+    pub headers: Vec<HeaderRule>,
     /// Subscribe to message-waiting indications (on
     /// when a voicemail number is set).
     pub mwi: bool,
@@ -193,6 +208,8 @@ impl Default for AccountConfig {
             allow_rewrite: false,
             disable_session_timer: false,
             initial_auth: false,
+            number_uri: String::new(),
+            headers: Vec::new(),
             mwi: false,
             hide_cid: false,
         }
@@ -223,6 +240,41 @@ impl AccountConfig {
         }
         uri.push_str(self.transport_suffix());
         format!("<{uri}>")
+    }
+
+    /// The URI to call for `target`, a number or user without a host:
+    /// through the number template when there is one.
+    pub fn call_uri(&self, target: &str) -> String {
+        if self.number_uri.trim().is_empty() || target.contains('@') {
+            return self.sip_uri(target);
+        }
+        let filled = self.number_uri.trim().replace("{number}", target).replace("{domain}", &self.domain);
+        let lower = filled.to_ascii_lowercase();
+        let scheme = if lower.starts_with("sip:") || lower.starts_with("sips:") { "" } else { "sip:" };
+        format!("<{scheme}{filled}{}>", self.transport_suffix())
+    }
+
+    /// The host of the account's From (its identity): the username's own,
+    /// else the domain.
+    pub fn from_host(&self) -> String {
+        let user = self.username.trim();
+        let user = user.strip_prefix("sip:").unwrap_or(user);
+        match user.split_once('@') {
+            Some((_, host)) => host.split([';', '>']).next().unwrap_or(host).to_owned(),
+            None => self.domain.clone(),
+        }
+    }
+
+    /// The header rules as the shim takes them: `METHODS\tNAME\tVALUE\n`.
+    pub fn header_rules_text(&self) -> String {
+        let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+        self.headers
+            .iter()
+            .map(|r| {
+                let methods = if r.methods.is_empty() { "*".to_owned() } else { clean(&r.methods.join(" ")) };
+                format!("{methods}\t{}\t{}\n", clean(&r.name), clean(&r.value))
+            })
+            .collect()
     }
 
     /// The realm of the account's credentials. Any realm (`*`), except
@@ -297,6 +349,32 @@ mod tests {
         assert_eq!(acc.proxy_uris(), ["sip:192.168.29.1:5068;transport=tls;lr"]);
         assert_eq!(acc.sip_uri("1234"), "<sip:1234@192.168.29.1:5068;transport=tls>");
         assert_eq!(acc.auth_user(), acc.username);
+    }
+
+    #[test]
+    fn numbers_follow_the_template() {
+        let mut acc = AccountConfig { username: "+910000000000".into(), domain: "ims.example".into(), transport: Transport::Tls, ..AccountConfig::default() };
+        assert_eq!(acc.call_uri("0123456789"), "<sip:0123456789@ims.example;transport=tls>");
+        acc.number_uri = "sip:{number};phone-context={domain}@{domain};user=phone".into();
+        assert_eq!(acc.call_uri("0123456789"), "<sip:0123456789;phone-context=ims.example@ims.example;user=phone;transport=tls>");
+        assert_eq!(acc.call_uri("bob@pbx.example"), "<sip:bob@pbx.example;transport=tls>", "addresses with a host stay");
+        acc.number_uri = "{number}@{domain}".into();
+        assert_eq!(acc.call_uri("100"), "<sip:100@ims.example;transport=tls>");
+        assert_eq!(acc.id_uri(), "<sip:+910000000000@ims.example;transport=tls>", "the identity doesn't use it");
+    }
+
+    #[test]
+    fn header_rules_for_the_shim() {
+        let mut acc = AccountConfig { username: "1001@pbx.example".into(), domain: "other.example".into(), ..AccountConfig::default() };
+        assert_eq!(acc.from_host(), "pbx.example");
+        acc.username = "1001".into();
+        assert_eq!(acc.from_host(), "other.example");
+        acc.headers = vec![
+            HeaderRule { methods: vec![], name: "P-Access-Network-Info".into(), value: "GPON;PSAPId=+910000".into() },
+            HeaderRule { methods: vec!["INVITE".into(), "PRACK".into()], name: "X-Tab".into(), value: "a\tb".into() },
+            HeaderRule { methods: vec![], name: "User-Agent".into(), value: String::new() },
+        ];
+        assert_eq!(acc.header_rules_text(), "*\tP-Access-Network-Info\tGPON;PSAPId=+910000\nINVITE PRACK\tX-Tab\ta b\n*\tUser-Agent\t\n");
     }
 
     #[test]

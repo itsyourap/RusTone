@@ -4,6 +4,7 @@
 mod audio;
 mod callbacks;
 mod calls;
+mod headers;
 pub mod debug;
 mod messages;
 mod presence;
@@ -172,6 +173,7 @@ impl Session {
         // SAFETY: the configs and the arena's strings outlive the call.
         check(unsafe { pjsua_init(&ua, &log, &media) }, "pjsua_init")?;
         debug::install_message_tap();
+        headers::install();
         self.create_transports(cfg);
         check(unsafe { pjsua_start() }, "pjsua_start")?;
         if cfg.null_audio {
@@ -282,6 +284,7 @@ impl Session {
             self.account = PJSUA_INVALID_ID;
         }
         self.account_config = account.cloned();
+        headers::set(account);
         let Some(account) = account else {
             sink(Event::Registration(RegState::Unregistered));
             return;
@@ -693,7 +696,7 @@ impl Session {
             return Ok(format!("<sip:{target}>"));
         }
         match &self.account_config {
-            Some(account) => Ok(account.sip_uri(target)),
+            Some(account) => Ok(account.call_uri(target)),
             None => Err("no account to call from".into()),
         }
     }
@@ -939,6 +942,7 @@ impl Session {
         record::stop_all();
         debug::remove_taps();
         debug::remove_message_tap();
+        headers::remove();
         // SAFETY: on the engine thread; pjsua was created by `start`.
         unsafe { pjsua_destroy() };
         log::info!("SIP engine stopped");

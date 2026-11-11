@@ -89,6 +89,11 @@ pub struct Account {
     /// Send an empty Digest Authorization header in requests before the
     /// server challenges (IMS networks want it in the first REGISTER).
     pub initial_auth: bool,
+    /// The SIP address dialled numbers become, with `{number}` and
+    /// `{domain}`; empty for `sip:{number}@{domain}`.
+    pub number_uri: String,
+    /// Header rules for the account's requests (see [`crate::headers`]).
+    pub headers: String,
 }
 
 impl Default for Account {
@@ -118,6 +123,8 @@ impl Default for Account {
             allow_rewrite: false,
             disable_session_timer: false,
             initial_auth: false,
+            number_uri: String::new(),
+            headers: String::new(),
         }
     }
 }
