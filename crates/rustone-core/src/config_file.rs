@@ -13,6 +13,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::account::Account;
 use crate::settings::Settings;
@@ -30,8 +31,10 @@ pub struct ConfigFile {
     /// The app and version that wrote it, for people reading the file.
     #[serde(default)]
     pub exported_by: String,
-    /// Every setting; its accounts are in `accounts` instead.
-    pub settings: Settings,
+    /// The settings as written in the file: an import changes only the
+    /// ones it has. Its accounts are in `accounts` instead.
+    #[serde(default)]
+    pub settings: Value,
     #[serde(default)]
     pub accounts: Vec<ExportedAccount>,
 }
@@ -47,6 +50,10 @@ pub struct ExportedAccount {
     /// The account in use when it was exported.
     #[serde(default)]
     pub active: bool,
+    /// The account as written in the file, so updating an existing account
+    /// changes only the fields it has.
+    #[serde(skip)]
+    pub raw: Value,
 }
 
 /// `settings` and the accounts with `account_ids` (their passwords held in
@@ -56,15 +63,16 @@ pub fn export(settings: &Settings, account_ids: &[u32], exported_by: &str) -> St
         .accounts
         .iter()
         .filter(|a| account_ids.contains(&a.id))
-        .map(|a| ExportedAccount { account: Account { password: String::new(), ..a.clone() }, password: a.password.clone(), active: settings.active_account == Some(a.id) })
+        .map(|a| ExportedAccount {
+            account: Account { password: String::new(), ..a.clone() },
+            password: a.password.clone(),
+            active: settings.active_account == Some(a.id),
+            raw: Value::Null,
+        })
         .collect();
-    let file = ConfigFile {
-        format: FORMAT.into(),
-        version: VERSION,
-        exported_by: exported_by.into(),
-        settings: Settings { accounts: Vec::new(), active_account: None, ..settings.clone() },
-        accounts,
-    };
+    let mut values = serde_json::to_value(settings).expect("settings serialize");
+    strip(&mut values, &[&["accounts"], &["active_account"]]);
+    let file = ConfigFile { format: FORMAT.into(), version: VERSION, exported_by: exported_by.into(), settings: values, accounts };
     serde_json::to_string_pretty(&file).expect("settings serialize")
 }
 
@@ -80,7 +88,58 @@ pub fn parse(text: &str) -> Result<ConfigFile, String> {
     if version == 0 || version > u64::from(VERSION) {
         return Err(format!("made by a newer RusTone (format version {version})"));
     }
-    serde_json::from_value(value).map_err(|e| format!("can't read it: {e}"))
+    let mut file: ConfigFile = serde_json::from_value(value.clone()).map_err(|e| format!("can't read it: {e}"))?;
+    if file.settings.is_null() {
+        // No settings: an import of accounts only.
+        file.settings = Value::Object(serde_json::Map::new());
+    }
+    if !file.settings.is_object() {
+        return Err("can't read it: \"settings\" isn't an object".into());
+    }
+    // The settings it has must be of the right kinds.
+    let mut check = serde_json::to_value(Settings::default()).expect("settings serialize");
+    merge(&mut check, &file.settings);
+    serde_json::from_value::<Settings>(check).map_err(|e| format!("can't read its settings: {e}"))?;
+    for (exported, raw) in file.accounts.iter_mut().zip(value["accounts"].as_array().into_iter().flatten()) {
+        exported.raw = raw.clone();
+    }
+    Ok(file)
+}
+
+/// Lays `overlay` over `base`: objects key by key, at every depth;
+/// anything else (numbers, strings, lists) replaces what was there.
+fn merge(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base), Value::Object(overlay)) => {
+            for (key, value) in overlay {
+                merge(base.entry(key.clone()).or_insert(Value::Null), value);
+            }
+        }
+        (base, overlay) => *base = overlay.clone(),
+    }
+}
+
+/// Removes the keys at `paths` (e.g. `["ui", "window"]`) from `value`.
+fn strip(value: &mut Value, paths: &[&[&str]]) {
+    for path in paths {
+        strip_path(value, path);
+    }
+}
+
+fn strip_path(value: &mut Value, path: &[&str]) {
+    match path {
+        [] => {}
+        [last] => {
+            if let Some(object) = value.as_object_mut() {
+                object.remove(*last);
+            }
+        }
+        [first, rest @ ..] => {
+            if let Some(next) = value.get_mut(*first) {
+                strip_path(next, rest);
+            }
+        }
+    }
 }
 
 /// Whether two accounts are the same one: same user on the same server and
@@ -104,23 +163,40 @@ pub struct ImportPlan {
     pub activate: Option<usize>,
 }
 
-/// Plans an import: the file's settings replace `current`'s, except the
-/// accounts (kept, and the chosen ones added or updated) and the window's
-/// place on this screen.
+/// Plans an import: the settings the file has replace `current`'s and the
+/// ones it hasn't stay, as do the accounts (the chosen ones are added, or
+/// update the matching one, again only in the fields the file has) and
+/// the window's place on this screen.
 pub fn plan_import(current: &Settings, file: &ConfigFile, selected: &[usize]) -> ImportPlan {
-    let mut settings = file.settings.clone();
+    let mut overlay = file.settings.clone();
+    strip(&mut overlay, &[&["accounts"], &["active_account"], &["ui", "window"]]);
+    let mut values = serde_json::to_value(current).expect("settings serialize");
+    merge(&mut values, &overlay);
+    let mut settings: Settings = serde_json::from_value(values).unwrap_or_else(|_| current.clone());
+    // Passwords aren't serialized: the accounts come back as they were.
     settings.accounts = current.accounts.clone();
     settings.active_account = current.active_account;
-    settings.ui.window = current.ui.window;
 
     let mut accounts = Vec::new();
     let mut activate = None;
     for (_, exported) in file.accounts.iter().enumerate().filter(|(i, _)| selected.contains(i)) {
-        let id = current.accounts.iter().find(|a| same_account(a, &exported.account)).map_or(0, |a| a.id);
+        let account = match current.accounts.iter().find(|a| same_account(a, &exported.account)) {
+            Some(mine) => {
+                let mut raw = exported.raw.clone();
+                strip(&mut raw, &[&["id"], &["password"], &["active"]]);
+                let mut values = serde_json::to_value(mine).expect("account serializes");
+                merge(&mut values, &raw);
+                let merged: Account = serde_json::from_value(values).unwrap_or_else(|_| exported.account.clone());
+                // A file without the password keeps the one stored here.
+                let password = if exported.raw.get("password").is_some() { exported.password.clone() } else { mine.password.clone() };
+                Account { id: mine.id, password, ..merged }
+            }
+            None => Account { id: 0, password: exported.password.clone(), ..exported.account.clone() },
+        };
         if exported.active || (activate.is_none() && current.active_account.is_none()) {
             activate = Some(accounts.len());
         }
-        accounts.push(Account { id, password: exported.password.clone(), ..exported.account.clone() });
+        accounts.push(account);
     }
     ImportPlan { settings, accounts, activate }
 }
@@ -145,8 +221,8 @@ mod tests {
         let s = sample();
         let text = export(&s, &[2], "RusTone test");
         let file = parse(&text).unwrap();
-        assert_eq!(file.settings.sip.audio_codecs, "opus/48000/2 AMR-WB/16000/1 PCMA/8000/1", "codec order");
-        assert!(file.settings.accounts.is_empty() && file.settings.active_account.is_none());
+        assert_eq!(file.settings["sip"]["audio_codecs"], "opus/48000/2 AMR-WB/16000/1 PCMA/8000/1", "codec order");
+        assert!(file.settings.get("accounts").is_none() && file.settings.get("active_account").is_none());
         assert_eq!(file.accounts.len(), 1);
         assert_eq!(file.accounts[0].account.label, "Home");
         assert_eq!(file.accounts[0].password, "hunter2", "plain-text password");
@@ -162,9 +238,40 @@ mod tests {
         assert!(parse("not json").unwrap_err().contains("JSON"));
         assert!(parse("{\"format\": \"other\"}").unwrap_err().contains("not a RusTone"));
         assert!(parse("{\"format\": \"rustone-config\", \"version\": 99, \"settings\": {}}").unwrap_err().contains("newer"));
-        // Missing settings take their defaults.
-        let file = parse("{\"format\": \"rustone-config\", \"version\": 1, \"settings\": {}}").unwrap();
+        assert!(parse("{\"format\": \"rustone-config\", \"version\": 1, \"settings\": {\"sip\": {\"rport\": \"yes\"}}}").unwrap_err().contains("settings"), "wrong kinds");
+        let file = parse("{\"format\": \"rustone-config\", \"version\": 1}").unwrap();
         assert!(file.accounts.is_empty());
+    }
+
+    #[test]
+    fn settings_the_file_lacks_stay() {
+        let mut current = sample();
+        current.ui.theme = crate::settings::ThemePreference::Dark;
+        current.sip.dns_srv = true;
+        current.calls.auto_answer = true;
+        let text = r#"{"format": "rustone-config", "version": 1,
+            "settings": {"sip": {"audio_codecs": "AMR-WB/16000/1"}, "calls": {"dnd": true}}}"#;
+        let plan = plan_import(&current, &parse(text).unwrap(), &[]);
+        assert_eq!(plan.settings.sip.audio_codecs, "AMR-WB/16000/1", "present: imported");
+        assert!(plan.settings.calls.dnd);
+        assert!(plan.settings.sip.dns_srv, "absent in a present section: kept");
+        assert!(plan.settings.calls.auto_answer);
+        assert_eq!(plan.settings.ui.theme, crate::settings::ThemePreference::Dark, "absent section: kept");
+        assert_eq!(plan.settings.accounts, current.accounts, "passwords included");
+    }
+
+    #[test]
+    fn account_fields_the_file_lacks_stay() {
+        let current = sample();
+        // Office, with only its label and transport in the file, no password.
+        let text = r#"{"format": "rustone-config", "version": 1, "settings": {},
+            "accounts": [{"server": "sip.example.com", "username": "1001", "label": "Work", "transport": "udp"}]}"#;
+        let plan = plan_import(&current, &parse(text).unwrap(), &[0]);
+        let office = &plan.accounts[0];
+        assert_eq!((office.id, office.label.as_str()), (1, "Work"));
+        assert_eq!(office.transport, Transport::Udp);
+        assert_eq!(office.password, "secret", "no password in the file: kept");
+        assert_eq!(office.register_refresh, current.accounts[0].register_refresh);
     }
 
     #[test]
