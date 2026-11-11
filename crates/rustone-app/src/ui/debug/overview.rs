@@ -79,6 +79,9 @@ pub fn show(ui: &mut Ui, app: &mut App, p: &Palette) {
                     kv(ui, p, "SIP port", if s.source_port == 0 { "any".to_owned() } else { s.source_port.to_string() });
                     kv(ui, p, "RTP ports", format!("{}–{}", s.rtp_port_min, s.rtp_port_max));
                     kv(ui, p, "STUN", if s.enable_stun { s.stun.clone() } else { "off".into() });
+                    let servers = crate::dns::nameservers(s);
+                    kv(ui, p, "DNS", if servers.is_empty() { "system resolver".to_owned() } else { servers.join(", ") });
+                    kv(ui, p, "DNS SRV", s.dns_srv.to_string());
                     kv(ui, p, "DTMF", format!("{:?}", app.settings.calls.dtmf_method));
                     kv(ui, p, "Local account", app.settings.local_account.enabled.to_string());
                     kv(ui, p, "SIP log file", s.enable_log.to_string());

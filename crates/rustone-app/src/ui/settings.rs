@@ -32,6 +32,45 @@ fn users_directory(ui: &mut Ui, app: &mut App, p: &Palette) {
     });
 }
 
+fn network(ui: &mut Ui, app: &mut App, p: &Palette) {
+    card(ui, p, |ui| {
+        // Applied when the field loses focus: a change restarts the engine.
+        let draft_id = ui.make_persistent_id("dns-servers-draft");
+        let mut servers = ui.data(|d| d.get_temp::<String>(draft_id)).unwrap_or_else(|| app.settings.sip.dns_srv_ns.clone());
+        let response = widgets::text_field(ui, p, "DNS servers", "The system's; or IP addresses, e.g. 192.168.29.1", &mut servers);
+        if response.lost_focus() {
+            ui.data_mut(|d| d.remove::<String>(draft_id));
+            if servers != app.settings.sip.dns_srv_ns {
+                app.settings.sip.dns_srv_ns = servers;
+                app.mark_settings_dirty();
+            }
+        } else if response.has_focus() {
+            ui.data_mut(|d| d.insert_temp(draft_id, servers));
+        }
+        let sip = &app.settings.sip;
+        let invalid = sip.invalid_dns_servers();
+        if !invalid.is_empty() {
+            ui.label(egui::RichText::new(format!("Not IP addresses, skipped: {}", invalid.join(", "))).size(12.0).color(p.danger));
+        }
+        ui.add_space(4.0);
+        let mut srv = sip.dns_srv;
+        setting_row(ui, p, "DNS SRV", Some("Find the SIP server from its SRV records (_sip._udp, _sips._tcp…) when it has no port"), |ui| {
+            if widgets::toggle(ui, p, &mut srv, "DNS SRV").changed() {
+                app.settings.sip.dns_srv = srv;
+                app.mark_settings_dirty();
+            }
+        });
+        let sip = &app.settings.sip;
+        let used = crate::dns::nameservers(sip);
+        let status = match (used.is_empty(), sip.dns_srv) {
+            (true, _) => "The system looks up the server's A and AAAA records.".to_owned(),
+            (false, true) => format!("{} looks up SRV, then A and AAAA records.", used.join(", ")),
+            (false, false) => format!("{} looks up A and AAAA records.", used.join(", ")),
+        };
+        ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
+    });
+}
+
 fn calls(ui: &mut Ui, app: &mut App, p: &Palette) {
     card(ui, p, |ui| {
         let calls = &mut app.settings.calls;
@@ -720,6 +759,7 @@ pub enum Section {
     Video,
     Recording,
     UsersDirectory,
+    Network,
     Features,
     Behaviour,
     Appearance,
@@ -752,13 +792,13 @@ impl Tab {
 impl Section {
     fn tab(self) -> Tab {
         match self {
-            Self::Accounts | Self::UsersDirectory | Self::Features | Self::Behaviour | Self::Appearance | Self::Developer | Self::About => Tab::General,
+            Self::Accounts | Self::UsersDirectory | Self::Network | Self::Features | Self::Behaviour | Self::Appearance | Self::Developer | Self::About => Tab::General,
             Self::Calls | Self::AutoAnswer | Self::Forwarding | Self::FeatureCodes | Self::SpeedDial | Self::Recording | Self::CommandHooks => Tab::Calls,
             Self::AudioDevices | Self::AudioCodecs | Self::AudioProcessing | Self::Video => Tab::AudioVideo,
         }
     }
 
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 19] = [
         Self::Accounts,
         Self::Calls,
         Self::AutoAnswer,
@@ -771,6 +811,7 @@ impl Section {
         Self::Video,
         Self::Recording,
         Self::UsersDirectory,
+        Self::Network,
         Self::Features,
         Self::Behaviour,
         Self::Appearance,
@@ -794,6 +835,7 @@ impl Section {
             Self::Video => "Video",
             Self::Recording => "Recording",
             Self::UsersDirectory => "Users directory",
+            Self::Network => "Network",
             Self::Features => "Features",
             Self::Behaviour => "Behaviour",
             Self::Appearance => "Appearance",
@@ -809,7 +851,7 @@ impl Section {
             Self::Calls | Self::CommandHooks => 560.0,
             Self::AudioCodecs => 460.0,
             Self::AutoAnswer | Self::AudioDevices | Self::Behaviour => 340.0,
-            Self::Video | Self::Recording | Self::Features | Self::FeatureCodes | Self::AudioProcessing => 260.0,
+            Self::Video | Self::Recording | Self::Features | Self::FeatureCodes | Self::AudioProcessing | Self::Network => 260.0,
             Self::Accounts | Self::Forwarding | Self::Appearance => 200.0,
             Self::SpeedDial | Self::UsersDirectory => 140.0,
             Self::Developer | Self::About => 80.0,
@@ -836,6 +878,7 @@ impl Section {
             Self::Video => video(ui, app, p),
             Self::Recording => recording(ui, app, p),
             Self::UsersDirectory => users_directory(ui, app, p),
+            Self::Network => network(ui, app, p),
             Self::Features => features(ui, app, p),
             Self::Behaviour => behaviour(ui, app, p),
             Self::Appearance => appearance(ui, app, p),

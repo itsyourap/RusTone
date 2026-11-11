@@ -45,8 +45,11 @@ pub struct SipSettings {
     pub enable_stun: bool,
     /// STUN servers, separated by spaces, commas or semicolons.
     pub stun: String,
+    /// Look up the SIP server's SRV records (`_sip._udp`, `_sips._tcp`…),
+    /// with `dns_srv_ns` or else the system's DNS servers.
     pub dns_srv: bool,
-    /// DNS servers for SRV lookups, separated like `stun`.
+    /// DNS servers (IP addresses) for SIP lookups, separated like `stun`;
+    /// empty for the system's resolver.
     pub dns_srv_ns: String,
     /// Re-create transports and re-register when the network changes.
     pub network_changes: bool,
@@ -87,6 +90,21 @@ impl Default for SipSettings {
             users_directory: String::new(),
             enable_log: false,
         }
+    }
+}
+
+/// Most DNS servers pjsua takes.
+pub const MAX_DNS_SERVERS: usize = 4;
+
+impl SipSettings {
+    /// The DNS servers that are IP addresses, as many as pjsua takes.
+    pub fn dns_servers(&self) -> Vec<String> {
+        split_list(&self.dns_srv_ns).into_iter().filter(|s| s.parse::<std::net::IpAddr>().is_ok()).take(MAX_DNS_SERVERS).collect()
+    }
+
+    /// The DNS server entries that aren't IP addresses.
+    pub fn invalid_dns_servers(&self) -> Vec<String> {
+        split_list(&self.dns_srv_ns).into_iter().filter(|s| s.parse::<std::net::IpAddr>().is_err()).collect()
     }
 }
 
@@ -511,6 +529,14 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dns_servers_are_ip_addresses() {
+        let sip = SipSettings { dns_srv_ns: "192.168.29.1, dns.example 2001:db8::53; 1.1.1.1 8.8.8.8 9.9.9.9".into(), ..SipSettings::default() };
+        assert_eq!(sip.dns_servers(), ["192.168.29.1", "2001:db8::53", "1.1.1.1", "8.8.8.8"]);
+        assert_eq!(sip.invalid_dns_servers(), ["dns.example"]);
+        assert!(SipSettings::default().dns_servers().is_empty());
+    }
 
     #[test]
     fn round_trips() {

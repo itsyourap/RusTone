@@ -92,6 +92,8 @@ fastframe-autostart.workspace = true
 rustone-win.workspace = true
 fastframe-now-playing.workspace = true
 if-addrs = "0.15"
+# The system's DNS servers, for SIP SRV lookups.
+netdev = "0.46"
 resvg = "0.45"
 egui_plot = "0.37"
 realfft = "3.5"

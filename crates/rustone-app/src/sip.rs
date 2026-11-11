@@ -367,7 +367,7 @@ pub fn engine_config(settings: &Settings, log_file: &std::path::Path) -> EngineC
         rtp_port_min: sip.rtp_port_min,
         rtp_port_max: sip.rtp_port_max,
         stun_servers: if sip.enable_stun { split_list(&sip.stun) } else { Vec::new() },
-        nameservers: if sip.dns_srv { split_list(&sip.dns_srv_ns) } else { Vec::new() },
+        nameservers: crate::dns::nameservers(sip),
         ipv6: settings.active().is_some_and(|a| a.ip_version.uses_ipv6()),
         audio_codecs: sip.audio_codecs.split_whitespace().map(str::to_owned).collect(),
         vad: sip.vad,
@@ -384,10 +384,13 @@ pub fn engine_config(settings: &Settings, log_file: &std::path::Path) -> EngineC
     }
 }
 
-pub fn account_config(a: &Account, _sip: &rustone_core::settings::SipSettings) -> AccountConfig {
+pub fn account_config(a: &Account, sip: &rustone_core::settings::SipSettings) -> AccountConfig {
+    // With SRV off, explicit ports keep pjsua to A/AAAA lookups.
+    let pin = crate::dns::pin_ports(sip);
+    let host = |h: &str| if pin { crate::dns::with_default_port(h, a.transport == Transport::Tls) } else { h.to_owned() };
     AccountConfig {
-        server: a.server.trim().to_owned(),
-        proxies: a.proxies(),
+        server: host(a.server.trim()),
+        proxies: a.proxies().iter().map(|p| host(p)).collect(),
         domain: a.domain.trim().to_owned(),
         username: a.username.trim().to_owned(),
         password: a.password.clone(),
@@ -469,7 +472,8 @@ mod tests {
         settings.sip = rustone_core::settings::SipSettings { stun: "a; b".into(), dns_srv_ns: "8.8.8.8".into(), ..Default::default() };
         let log = std::path::Path::new("sip.log");
         let c = engine_config(&settings, log);
-        assert!(c.stun_servers.is_empty() && c.nameservers.is_empty() && c.log_file.is_none());
+        assert!(c.stun_servers.is_empty() && c.log_file.is_none());
+        assert_eq!(c.nameservers, ["8.8.8.8"], "configured DNS servers apply without SRV too");
         settings.sip.enable_stun = true;
         settings.sip.dns_srv = true;
         settings.sip.enable_log = true;
@@ -496,13 +500,21 @@ mod tests {
             voicemail_number: "*86".into(),
             ..Account::default()
         };
-        let c = account_config(&a, &rustone_core::settings::SipSettings::default());
+        let mut sip = rustone_core::settings::SipSettings::default();
+        let c = account_config(&a, &sip);
         assert_eq!(c.server, "sip.example.com");
         assert_eq!(c.proxies, ["192.168.29.1:5068"]);
         assert_eq!(c.transport, sip_engine::Transport::Tls);
         assert_eq!(c.ip_version, sip_engine::IpVersion::PreferIpv6);
         assert!(c.mwi);
         assert_eq!(c.password, "pw");
+        // Own DNS servers without SRV: explicit ports.
+        sip.dns_srv_ns = "192.168.29.1".into();
+        let c = account_config(&a, &sip);
+        assert_eq!(c.server, "sip.example.com:5061");
+        assert_eq!(c.proxies, ["192.168.29.1:5068"]);
+        sip.dns_srv = true;
+        assert_eq!(account_config(&a, &sip).server, "sip.example.com");
     }
 
     #[test]
