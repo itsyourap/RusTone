@@ -659,6 +659,17 @@ impl App {
         id
     }
 
+    /// Applies an imported configuration: its settings, then its accounts
+    /// (passwords to the credential store, as when saved in the editor).
+    pub fn apply_import(&mut self, plan: rustone_core::config_file::ImportPlan) {
+        self.settings = plan.settings;
+        let ids: Vec<u32> = plan.accounts.into_iter().map(|a| self.save_account(a)).collect();
+        if let Some(id) = plan.activate.and_then(|i| ids.get(i)) {
+            self.settings.active_account = Some(*id);
+        }
+        self.mark_settings_dirty();
+    }
+
     pub fn delete_account(&mut self, id: u32) {
         if let Some(account) = self.settings.remove_account(id) {
             if let Err(e) = self.secrets.delete(&account.secret_key()) {

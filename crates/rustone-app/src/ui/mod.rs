@@ -1,6 +1,7 @@
 //! The window's layout: header, page, bottom navigation.
 
 mod accounts;
+mod config_transfer;
 pub(crate) mod call;
 mod contacts;
 mod history;
@@ -51,6 +52,8 @@ pub struct UiState {
     pub settings_tab: settings::Tab,
     /// How each tab's sections sit in its columns.
     pub settings_layout: std::collections::HashMap<settings::Tab, settings::Layout>,
+    /// Settings' import and export of the configuration.
+    pub transfer: config_transfer::TransferState,
     /// Whether links open RusTone, read from the registry when Settings opens.
     pub links_handled: Option<bool>,
     /// Two-number speed-dial buttons whose next press uses the second.

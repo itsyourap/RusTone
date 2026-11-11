@@ -3,6 +3,7 @@
 pub mod account;
 pub mod codecs;
 pub mod command;
+pub mod config_file;
 pub mod contacts;
 pub mod dialplan;
 pub mod directory;

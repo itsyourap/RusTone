@@ -763,6 +763,7 @@ pub enum Section {
     Recording,
     UsersDirectory,
     Network,
+    ImportExport,
     Features,
     Behaviour,
     Appearance,
@@ -795,13 +796,13 @@ impl Tab {
 impl Section {
     fn tab(self) -> Tab {
         match self {
-            Self::Accounts | Self::UsersDirectory | Self::Network | Self::Features | Self::Behaviour | Self::Appearance | Self::Developer | Self::About => Tab::General,
+            Self::Accounts | Self::UsersDirectory | Self::Network | Self::ImportExport | Self::Features | Self::Behaviour | Self::Appearance | Self::Developer | Self::About => Tab::General,
             Self::Calls | Self::AutoAnswer | Self::Forwarding | Self::FeatureCodes | Self::SpeedDial | Self::Recording | Self::CommandHooks => Tab::Calls,
             Self::AudioDevices | Self::AudioCodecs | Self::AudioProcessing | Self::Video => Tab::AudioVideo,
         }
     }
 
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 20] = [
         Self::Accounts,
         Self::Calls,
         Self::AutoAnswer,
@@ -815,6 +816,7 @@ impl Section {
         Self::Recording,
         Self::UsersDirectory,
         Self::Network,
+        Self::ImportExport,
         Self::Features,
         Self::Behaviour,
         Self::Appearance,
@@ -839,6 +841,7 @@ impl Section {
             Self::Recording => "Recording",
             Self::UsersDirectory => "Users directory",
             Self::Network => "Network",
+            Self::ImportExport => "Import and export",
             Self::Features => "Features",
             Self::Behaviour => "Behaviour",
             Self::Appearance => "Appearance",
@@ -856,7 +859,7 @@ impl Section {
             Self::AutoAnswer | Self::AudioDevices | Self::Behaviour => 340.0,
             Self::Video | Self::Recording | Self::Features | Self::FeatureCodes | Self::AudioProcessing | Self::Network => 260.0,
             Self::Accounts | Self::Forwarding | Self::Appearance => 200.0,
-            Self::SpeedDial | Self::UsersDirectory => 140.0,
+            Self::SpeedDial | Self::UsersDirectory | Self::ImportExport => 140.0,
             Self::Developer | Self::About => 80.0,
         }
     }
@@ -882,6 +885,7 @@ impl Section {
             Self::Recording => recording(ui, app, p),
             Self::UsersDirectory => users_directory(ui, app, p),
             Self::Network => network(ui, app, p),
+            Self::ImportExport => super::config_transfer::section(ui, app, p),
             Self::Features => features(ui, app, p),
             Self::Behaviour => behaviour(ui, app, p),
             Self::Appearance => appearance(ui, app, p),

@@ -82,8 +82,10 @@ conversations.
 - Your own DNS servers (your router's, say) and DNS SRV lookups, with a built-in lookup that
   follows NAPTR, SRV, AAAA and A records to show which servers an account will reach
 - STUN and ICE for NAT traversal, and outbound proxies
-- Passwords are kept in the operating system's credential store (Windows Credential Manager, macOS Keychain, the Secret Service on Linux), never in a file
+- Passwords are kept in the operating system's credential store (Windows Credential Manager, macOS Keychain, the Secret Service on Linux), never in the settings file
 - A local "call by IP" account for direct calls without a server
+- Import and export of all settings and the accounts you choose as a JSON file, to back up or set up
+  another computer (exported accounts carry their passwords in plain text)
 
 **Codecs**: G.711 (PCMA/PCMU), G.722, AMR-NB, AMR-WB, Speex, iLBC, GSM and G.722.1 for audio; H.264 for video.
 
