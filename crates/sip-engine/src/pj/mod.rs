@@ -344,7 +344,7 @@ impl Session {
         callbacks::set_main_account(id);
         if a.server_affinity {
             // SAFETY: a valid account id from this session.
-            if let Err(e) = check(unsafe { shim::pjsua_acc_set_server_affinity(id, PJ_TRUE) }, "keeping requests on the registration's connection") {
+            if let Err(e) = check(unsafe { pjsua_acc_set_server_affinity(id, PJ_TRUE) }, "keeping requests on the registration's connection") {
                 log::warn!("{e}");
             }
         }

@@ -2345,11 +2345,11 @@ impl Default for pjsip_server_address_record {
 #[derive(Copy, Clone)]
 pub struct pjsip_server_addresses {
     pub count: ::std::os::raw::c_uint,
-    pub entry: [pjsip_server_address_record; 16usize],
+    pub entry: [pjsip_server_address_record; 32usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pjsip_server_addresses"][::std::mem::size_of::<pjsip_server_addresses>() - 1032usize];
+    ["Size of pjsip_server_addresses"][::std::mem::size_of::<pjsip_server_addresses>() - 2056usize];
     ["Alignment of pjsip_server_addresses"]
         [::std::mem::align_of::<pjsip_server_addresses>() - 8usize];
     ["Offset of field: pjsip_server_addresses::count"]
@@ -2765,7 +2765,7 @@ pub struct pjsip_tx_data__bindgen_ty_1 {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of pjsip_tx_data__bindgen_ty_1"]
-        [::std::mem::size_of::<pjsip_tx_data__bindgen_ty_1>() - 1056usize];
+        [::std::mem::size_of::<pjsip_tx_data__bindgen_ty_1>() - 2080usize];
     ["Alignment of pjsip_tx_data__bindgen_ty_1"]
         [::std::mem::align_of::<pjsip_tx_data__bindgen_ty_1>() - 8usize];
     ["Offset of field: pjsip_tx_data__bindgen_ty_1::name"]
@@ -2773,7 +2773,7 @@ const _: () = {
     ["Offset of field: pjsip_tx_data__bindgen_ty_1::addr"]
         [::std::mem::offset_of!(pjsip_tx_data__bindgen_ty_1, addr) - 16usize];
     ["Offset of field: pjsip_tx_data__bindgen_ty_1::cur_addr"]
-        [::std::mem::offset_of!(pjsip_tx_data__bindgen_ty_1, cur_addr) - 1048usize];
+        [::std::mem::offset_of!(pjsip_tx_data__bindgen_ty_1, cur_addr) - 2072usize];
 };
 impl Default for pjsip_tx_data__bindgen_ty_1 {
     fn default() -> Self {
@@ -2821,7 +2821,7 @@ impl Default for pjsip_tx_data__bindgen_ty_2 {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pjsip_tx_data"][::std::mem::size_of::<pjsip_tx_data>() - 1928usize];
+    ["Size of pjsip_tx_data"][::std::mem::size_of::<pjsip_tx_data>() - 2952usize];
     ["Alignment of pjsip_tx_data"][::std::mem::align_of::<pjsip_tx_data>() - 8usize];
     ["Offset of field: pjsip_tx_data::prev"][::std::mem::offset_of!(pjsip_tx_data, prev) - 0usize];
     ["Offset of field: pjsip_tx_data::next"][::std::mem::offset_of!(pjsip_tx_data, next) - 8usize];
@@ -2850,17 +2850,17 @@ const _: () = {
     ["Offset of field: pjsip_tx_data::dest_info"]
         [::std::mem::offset_of!(pjsip_tx_data, dest_info) - 464usize];
     ["Offset of field: pjsip_tx_data::tp_info"]
-        [::std::mem::offset_of!(pjsip_tx_data, tp_info) - 1520usize];
+        [::std::mem::offset_of!(pjsip_tx_data, tp_info) - 2544usize];
     ["Offset of field: pjsip_tx_data::tp_sel"]
-        [::std::mem::offset_of!(pjsip_tx_data, tp_sel) - 1616usize];
+        [::std::mem::offset_of!(pjsip_tx_data, tp_sel) - 2640usize];
     ["Offset of field: pjsip_tx_data::auth_retry"]
-        [::std::mem::offset_of!(pjsip_tx_data, auth_retry) - 1632usize];
+        [::std::mem::offset_of!(pjsip_tx_data, auth_retry) - 2656usize];
     ["Offset of field: pjsip_tx_data::mod_data"]
-        [::std::mem::offset_of!(pjsip_tx_data, mod_data) - 1640usize];
+        [::std::mem::offset_of!(pjsip_tx_data, mod_data) - 2664usize];
     ["Offset of field: pjsip_tx_data::via_addr"]
-        [::std::mem::offset_of!(pjsip_tx_data, via_addr) - 1896usize];
+        [::std::mem::offset_of!(pjsip_tx_data, via_addr) - 2920usize];
     ["Offset of field: pjsip_tx_data::via_tp"]
-        [::std::mem::offset_of!(pjsip_tx_data, via_tp) - 1920usize];
+        [::std::mem::offset_of!(pjsip_tx_data, via_tp) - 2944usize];
 };
 impl Default for pjsip_tx_data {
     fn default() -> Self {
@@ -11596,6 +11596,9 @@ const _: () = {
 };
 unsafe extern "C" {
     pub fn pjsua_acc_del_param_default(prm: *mut pjsua_acc_del_param);
+}
+unsafe extern "C" {
+    pub fn pjsua_acc_set_server_affinity(acc_id: pjsua_acc_id, enabled: pj_bool_t) -> pj_status_t;
 }
 unsafe extern "C" {
     pub fn pjsua_acc_del(acc_id: pjsua_acc_id) -> pj_status_t;

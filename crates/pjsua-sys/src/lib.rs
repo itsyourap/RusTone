@@ -31,7 +31,7 @@ pub use ffi::*;
 
 /// Helpers from `shim/jf_shim.c`.
 pub mod shim {
-    use super::{pj_bool_t, pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_acc_id, pjsua_call_id, pjsua_msg_data, pjsua_reg_info};
+    use super::{pj_status_t, pjmedia_port, pjsip_cfg_t, pjsip_rx_data, pjsua_call_id, pjsua_msg_data, pjsua_reg_info};
     use std::ffi::{c_char, c_int, c_short, c_uint, c_void};
 
     /// Called for every SIP message sent (`is_rx` 0) or received (1).
@@ -122,11 +122,6 @@ pub mod shim {
         pub fn jf_msg_tap_install(cb: MsgCallback) -> pj_status_t;
         /// Unregisters it (before pjsua_destroy).
         pub fn jf_msg_tap_remove();
-
-        /// Keeps the account's requests on the TCP/TLS connection its last
-        /// successful registration used (the pjproject fork's addition, so
-        /// not in the generated bindings).
-        pub fn pjsua_acc_set_server_affinity(acc_id: pjsua_acc_id, enabled: pj_bool_t) -> pj_status_t;
 
         /// Registers the custom headers module (after pjsua_init).
         pub fn jf_headers_install() -> pj_status_t;
