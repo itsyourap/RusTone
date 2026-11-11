@@ -422,6 +422,7 @@ pub fn account_config(a: &Account, sip: &rustone_core::settings::SipSettings) ->
         allow_rewrite: a.allow_rewrite,
         disable_session_timer: a.disable_session_timer,
         initial_auth: a.initial_auth,
+        server_affinity: a.server_affinity,
         number_uri: a.number_uri.trim().to_owned(),
         headers: header_rules(a),
         mwi: !a.voicemail_number.trim().is_empty(),
@@ -522,6 +523,7 @@ mod tests {
         assert_eq!(c.transport, sip_engine::Transport::Tls);
         assert_eq!(c.ip_version, sip_engine::IpVersion::PreferIpv6);
         assert!(c.initial_auth);
+        assert!(!c.server_affinity);
         assert!(c.headers.is_empty() && c.number_uri.is_empty());
         assert!(c.mwi);
         assert_eq!(c.password, "pw");

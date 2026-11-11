@@ -174,6 +174,9 @@ pub struct AccountConfig {
     /// Send an empty Authorization header before the first challenge
     /// (pjsua's `auth_pref.initial_auth`), for IMS registrars.
     pub initial_auth: bool,
+    /// Keep requests on the registration's TCP/TLS connection (the fork's
+    /// `pjsua_acc_set_server_affinity`).
+    pub server_affinity: bool,
     /// What dialled numbers become, `{number}` and `{domain}` filled in
     /// (e.g. `sip:{number};phone-context={domain}@{domain};user=phone`);
     /// empty for `sip:{number}@{domain}`.
@@ -208,6 +211,7 @@ impl Default for AccountConfig {
             allow_rewrite: false,
             disable_session_timer: false,
             initial_auth: false,
+            server_affinity: false,
             number_uri: String::new(),
             headers: Vec::new(),
             mwi: false,

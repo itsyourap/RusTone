@@ -89,6 +89,10 @@ pub struct Account {
     /// Send an empty Digest Authorization header in requests before the
     /// server challenges (IMS networks want it in the first REGISTER).
     pub initial_auth: bool,
+    /// Send calls and other requests over the TCP/TLS connection the
+    /// registration used, instead of looking the server up again (which
+    /// may pick another of its addresses).
+    pub server_affinity: bool,
     /// The SIP address dialled numbers become, with `{number}` and
     /// `{domain}`; empty for `sip:{number}@{domain}`.
     pub number_uri: String,
@@ -123,6 +127,7 @@ impl Default for Account {
             allow_rewrite: false,
             disable_session_timer: false,
             initial_auth: false,
+            server_affinity: false,
             number_uri: String::new(),
             headers: String::new(),
         }

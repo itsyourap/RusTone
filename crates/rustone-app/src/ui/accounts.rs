@@ -189,6 +189,11 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
                 (&mut a.ice, "ICE", Some("NAT traversal for media")),
                 (&mut a.allow_rewrite, "Allow IP rewrite", Some("Use the address the server sees")),
                 (&mut a.disable_session_timer, "Disable session timers", None),
+                (
+                    &mut a.server_affinity,
+                    "Stay on the registered server",
+                    Some("Calls and messages go over the connection the registration used (TCP and TLS), as IMS P-CSCFs want"),
+                ),
                 (&mut a.initial_auth, "Send initial authorization", Some("An empty Authorization header before the server asks, as IMS (VoLTE, VoWiFi, fibre voice) wants")),
                 (&mut a.publish, "Publish presence", None),
             ] {

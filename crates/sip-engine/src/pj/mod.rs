@@ -342,6 +342,12 @@ impl Session {
         let status = unsafe { pjsua_acc_add(&ac, PJ_TRUE, &mut id) };
         check(status, "adding the account")?;
         callbacks::set_main_account(id);
+        if a.server_affinity {
+            // SAFETY: a valid account id from this session.
+            if let Err(e) = check(unsafe { shim::pjsua_acc_set_server_affinity(id, PJ_TRUE) }, "keeping requests on the registration's connection") {
+                log::warn!("{e}");
+            }
+        }
         // A registration that already finished during pjsua_acc_add was
         // ignored above; report it now.
         if let Some(state @ (RegState::Registered { .. } | RegState::Failed { .. })) = with_acc_info(id, current_reg_state) {
