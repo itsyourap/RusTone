@@ -8,7 +8,7 @@ matching the crate version, attaches them to a draft GitHub Release.
 | Platform | Formats | Notes |
 |---|---|---|
 | Windows x64, ARM64 | NSIS setup (per user), MSI | `SDL2.dll` and the OpenSSL DLLs are installed next to `rustone.exe`. Both installers register `sip:`/`tel:`/`callto:`. |
-| Linux x64, ARM64 | `.deb`, AppImage | The `.deb` depends on Ubuntu 24.04 / Debian 13 packages; the AppImage bundles the libraries. |
+| Linux x64, ARM64 | `.deb`, AppImage | The `.deb` depends on Ubuntu 24.04 / Debian 13 packages; the AppImage bundles the libraries, except Wayland's and EGL, which must match the system's graphics driver. |
 | macOS Apple silicon, Intel | `.dmg` | `bundle.sh` copies the Homebrew libraries into the app and signs it. |
 
 Each is built natively on a runner of its architecture.
