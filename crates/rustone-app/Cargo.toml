@@ -94,6 +94,8 @@ fastframe-now-playing.workspace = true
 if-addrs = "0.15"
 # The system's DNS servers, for SIP SRV lookups.
 netdev = "0.46"
+# DNS messages for the SIP server lookup in Settings (NAPTR, SRV, A, AAAA).
+hickory-proto = { version = "0.26", default-features = false, features = ["std"] }
 resvg = "0.45"
 egui_plot = "0.37"
 realfft = "3.5"

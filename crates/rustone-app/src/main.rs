@@ -8,6 +8,7 @@ mod autostart;
 mod calls;
 mod directory;
 mod dns;
+mod dns_discovery;
 mod headset;
 mod hookrun;
 mod icons;

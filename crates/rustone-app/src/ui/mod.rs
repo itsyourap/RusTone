@@ -51,6 +51,8 @@ pub struct UiState {
     pub settings_tab: settings::Tab,
     /// How each tab's sections sit in its columns.
     pub settings_layout: std::collections::HashMap<settings::Tab, settings::Layout>,
+    /// The Network section's SIP server lookup.
+    pub dns_lookup: settings::DnsLookup,
     /// Whether links open RusTone, read from the registry when Settings opens.
     pub links_handled: Option<bool>,
     /// Two-number speed-dial buttons whose next press uses the second.
