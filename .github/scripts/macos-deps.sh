@@ -19,5 +19,11 @@ if [ -n "$owner" ] && [ "$owner" != openssl@3 ]; then
   echo "Unlinking $owner: its OpenSSL headers in $headers would shadow openssl@3's"
   brew unlink "$owner"
 fi
+# Then link openssl@3 into the prefix when nothing is (it's keg-only next
+# to a newer one), so the link of RusTone, which searches the prefix's lib
+# folder, finds libssl and libcrypto there.
+if [ ! -e "$headers" ]; then
+  brew link --force openssl@3
+fi
 echo "OpenSSL in $(brew --prefix): $(grep -h 'define OPENSSL_VERSION_TEXT' "$headers/opensslv.h" 2>/dev/null || echo 'none linked')"
 echo "openssl@3: $(grep -h 'define OPENSSL_VERSION_TEXT' "$(brew --prefix openssl@3)/include/openssl/opensslv.h")"
