@@ -28,7 +28,7 @@ fn users_directory(ui: &mut Ui, app: &mut App, p: &Palette) {
             None if app.settings.sip.users_directory.trim().is_empty() => "Its contacts are added and kept up to date; yours are never changed.".to_owned(),
             None => "Loading…".to_owned(),
         };
-        ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new(status).size(12.0).color(p.dim));
     });
 }
 
@@ -50,7 +50,7 @@ fn network(ui: &mut Ui, app: &mut App, p: &Palette) {
         let sip = &app.settings.sip;
         let invalid = sip.invalid_dns_servers();
         if !invalid.is_empty() {
-            ui.label(egui::RichText::new(format!("Not IP addresses, skipped: {}", invalid.join(", "))).size(12.0).color(p.danger));
+            widgets::note(ui, egui::RichText::new(format!("Not IP addresses, skipped: {}", invalid.join(", "))).size(12.0).color(p.danger));
         }
         ui.add_space(4.0);
         let mut srv = sip.dns_srv;
@@ -67,8 +67,9 @@ fn network(ui: &mut Ui, app: &mut App, p: &Palette) {
             (false, true) => format!("{} looks up SRV, then A and AAAA records.", used.join(", ")),
             (false, false) => format!("{} looks up A and AAAA records.", used.join(", ")),
         };
-        ui.label(egui::RichText::new(status).size(12.0).color(p.dim));
-        if ui.link(egui::RichText::new("Look up the account's server in the debug window").size(12.0)).clicked() {
+        widgets::note(ui, egui::RichText::new(status).size(12.0).color(p.dim));
+        let link = ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.link(egui::RichText::new("Look up the account's server in the debug window").size(12.0)));
+        if link.inner.clicked() {
             crate::ui::debug::show_section(app, crate::ui::debug::Section::Dns);
         }
     });
@@ -188,7 +189,7 @@ fn recording(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
         ui.separator();
         let shown = recording.dir().display().to_string();
-        ui.label(egui::RichText::new("Folder").size(12.0).color(p.secondary));
+        widgets::note(ui, egui::RichText::new("Folder").size(12.0).color(p.secondary));
         ui.add(egui::Label::new(egui::RichText::new(&shown).size(12.5).color(p.text)).wrap());
         ui.horizontal(|ui| {
             if ui.button("Change…").clicked()
@@ -207,7 +208,7 @@ fn recording(ui: &mut Ui, app: &mut App, p: &Palette) {
                 let _ = std::process::Command::new("explorer").arg(&dir).spawn();
             }
         });
-        ui.label(egui::RichText::new("Recordings are WAV files with both sides of the call.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("Recordings are WAV files with both sides of the call.").size(12.0).color(p.dim));
         if changed {
             app.mark_settings_dirty();
         }
@@ -218,7 +219,7 @@ fn feature_codes(ui: &mut Ui, app: &mut App, p: &Palette) {
     card(ui, p, |ui| {
         let calls = &mut app.settings.calls;
         let mut changed = false;
-        ui.label(egui::RichText::new("Codes your PBX understands, sent before a number.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("Codes your PBX understands, sent before a number.").size(12.0).color(p.dim));
         changed |= widgets::text_field(ui, p, "Call pickup (empty for off)", "**", &mut calls.pickup_code).changed();
         ui.add_space(6.0);
         setting_row(ui, p, "Transfer with a code", Some("Dial the code and number in the call instead of a SIP transfer"), |ui| {
@@ -262,7 +263,7 @@ fn command_hooks(ui: &mut Ui, app: &mut App, p: &Palette) {
         if !open {
             return;
         }
-        ui.label(egui::RichText::new("{number}, {name}, {callid}, {direction}, {duration} and {time} are filled in; without them the number is added at the end.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("{number}, {name}, {callid}, {direction}, {duration} and {time} are filled in; without them the number is added at the end.").size(12.0).color(p.dim));
         let mut changed = false;
         for (value, label) in [
             (&mut hooks.outgoing_call, "Outgoing call"),
@@ -285,7 +286,7 @@ fn command_hooks(ui: &mut Ui, app: &mut App, p: &Palette) {
 
 fn features(ui: &mut Ui, app: &mut App, p: &Palette) {
     card(ui, p, |ui| {
-        ui.label(egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("Turn off what your provider doesn't support.").size(12.0).color(p.dim));
         let features = &mut app.settings.features;
         let mut changed = false;
         for (value, title, description) in [
@@ -358,7 +359,12 @@ fn behaviour(ui: &mut Ui, app: &mut App, p: &Palette) {
                 }
             }
         });
-        if links && ui.link(egui::RichText::new("Another app still opens them? Choose RusTone in Windows' Default apps").size(12.0)).clicked() {
+        if links
+            && ui
+                .with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.link(egui::RichText::new("Another app still opens them? Choose RusTone in Windows' Default apps").size(12.0)))
+                .inner
+                .clicked()
+        {
             let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
         }
     });
@@ -402,7 +408,7 @@ fn auto_answer_when_label(when: AutoAnswerWhen) -> &'static str {
 /// The speed-dial buttons: a list to edit, remove or add to.
 fn speed_dial(ui: &mut Ui, app: &mut App, p: &Palette) {
     use rustone_core::settings::{Shortcut, ShortcutAction};
-    ui.label(egui::RichText::new("Buttons under the dialer's keypad. With presence on, a dot shows the number's state and a press picks up its ringing call.").size(12.0).color(p.dim));
+    widgets::note(ui, egui::RichText::new("Buttons under the dialer's keypad. With presence on, a dot shows the number's state and a press picks up its ringing call.").size(12.0).color(p.dim));
     if let Some((index, mut draft)) = app.ui.shortcut_draft.take() {
         let mut keep = true;
         widgets::text_field(ui, p, "Label", "e.g. Reception", &mut draft.label);
@@ -541,7 +547,7 @@ fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
     let enabled_count = rows.iter().filter(|r| r.enabled).count();
     let mut new_list = None;
     card(ui, p, |ui| {
-        ui.label(egui::RichText::new("Offered in this order.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("Offered in this order.").size(12.0).color(p.dim));
         ui.add_space(4.0);
         for (i, row) in rows.iter().enumerate() {
             ui.horizontal(|ui| {
@@ -569,10 +575,10 @@ fn codecs(ui: &mut Ui, app: &mut App, p: &Palette) {
             });
         }
         if available.is_empty() {
-            ui.label(egui::RichText::new("The full codec list appears once the SIP engine has started.").size(12.0).color(p.dim));
+            widgets::note(ui, egui::RichText::new("The full codec list appears once the SIP engine has started.").size(12.0).color(p.dim));
         }
         if app.sip.calls.live_count() > 0 {
-            ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
+            widgets::note(ui, egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
         }
     });
     if let Some(list) = new_list {
@@ -614,7 +620,7 @@ fn audio_devices(ui: &mut Ui, app: &mut App, p: &Palette) {
             });
         }
         if devices.is_empty() {
-            ui.label(egui::RichText::new("The device list appears once the SIP engine has started.").size(12.0).color(p.dim));
+            widgets::note(ui, egui::RichText::new("The device list appears once the SIP engine has started.").size(12.0).color(p.dim));
         }
         ui.separator();
         setting_stack(ui, p, "Ringtone volume", None, |ui| {
@@ -691,7 +697,7 @@ fn processing(ui: &mut Ui, app: &mut App, p: &Palette, available: &[String]) {
     // Saving warns the same way.
     let stereo = sip.audio_codecs.split_whitespace().any(|c| !c.to_ascii_lowercase().starts_with("opus/") && c.ends_with("/2"));
     if stereo && sip.ec {
-        ui.label(egui::RichText::new("Echo cancellation turns the stereo codecs mono.").size(12.0).color(p.warning));
+        widgets::note(ui, egui::RichText::new("Echo cancellation turns the stereo codecs mono.").size(12.0).color(p.warning));
     }
     if changed {
         app.mark_settings_dirty();
@@ -722,7 +728,7 @@ fn video(ui: &mut Ui, app: &mut App, p: &Palette) {
         });
         ui.separator();
         changed |= widgets::number_field(ui, p, "Bitrate (kbit/s)", &mut app.settings.video.bitrate_kbps, 0..=8000, " kbit/s").changed();
-        ui.label(egui::RichText::new("0 keeps H.264's default (256 kbit/s).").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("0 keeps H.264's default (256 kbit/s).").size(12.0).color(p.dim));
         ui.separator();
         setting_row(ui, p, "Preview", Some("Check the camera"), |ui| {
             let label = if app.sip.preview { "Stop" } else { "Show" };
@@ -736,7 +742,7 @@ fn video(ui: &mut Ui, app: &mut App, p: &Palette) {
             crate::ui::video::preview(ui, &mut app.ui.video, &frames, p);
         }
         if app.sip.calls.live_count() > 0 {
-            ui.label(egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
+            widgets::note(ui, egui::RichText::new("Changes apply after the current call.").size(12.0).color(p.warning));
         }
     });
     if changed {

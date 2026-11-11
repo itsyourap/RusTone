@@ -157,10 +157,10 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.add_space(12.0);
         section_title(ui, p, "Connection");
         card(ui, p, |ui| {
-            ui.label(egui::RichText::new("Transport").size(12.0).color(p.secondary));
+            widgets::note(ui, egui::RichText::new("Transport").size(12.0).color(p.secondary));
             widgets::segmented(ui, p, &mut a.transport, &[(Transport::Udp, None, "UDP"), (Transport::Tcp, None, "TCP"), (Transport::Tls, Some(Icon::Lock), "TLS")]);
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("IP version").size(12.0).color(p.secondary));
+            widgets::note(ui, egui::RichText::new("IP version").size(12.0).color(p.secondary));
             egui::ComboBox::from_id_salt("ip-version")
                 .width(ui.available_width())
                 .selected_text(ip_version_label(a.ip_version))
@@ -170,7 +170,7 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
                     }
                 });
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Media encryption (SRTP)").size(12.0).color(p.secondary));
+            widgets::note(ui, egui::RichText::new("Media encryption (SRTP)").size(12.0).color(p.secondary));
             egui::ComboBox::from_id_salt("srtp")
                 .width(ui.available_width())
                 .selected_text(srtp_label(a.srtp))
@@ -217,11 +217,11 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
         ui.add_space(12.0);
         section_title(ui, p, "SIP messages");
         card(ui, p, |ui| {
-            ui.label(egui::RichText::new("For servers that want requests in their own form. Leave empty for the usual.").size(12.0).color(p.dim));
+            widgets::note(ui, egui::RichText::new("For servers that want requests in their own form. Leave empty for the usual.").size(12.0).color(p.dim));
             widgets::text_field(ui, p, "Number address", "sip:{number}@{domain}", &mut a.number_uri);
-            ui.label(egui::RichText::new("What dialled numbers become, e.g. sip:{number};phone-context={domain}@{domain};user=phone").size(12.0).color(p.dim));
+            widgets::note(ui, egui::RichText::new("What dialled numbers become, e.g. sip:{number};phone-context={domain}@{domain};user=phone").size(12.0).color(p.dim));
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Custom headers").size(12.0).color(p.secondary));
+            widgets::note(ui, egui::RichText::new("Custom headers").size(12.0).color(p.secondary));
             ui.add(
                 egui::TextEdit::multiline(&mut a.headers)
                     .font(egui::TextStyle::Monospace)
@@ -235,7 +235,7 @@ pub fn editor(ui: &mut Ui, app: &mut App, p: &Palette) {
                     .color(p.dim),
             );
             for error in rustone_core::headers::parse(&a.headers).1 {
-                ui.label(egui::RichText::new(error).size(12.0).color(p.danger));
+                widgets::note(ui, egui::RichText::new(error).size(12.0).color(p.danger));
             }
         });
 

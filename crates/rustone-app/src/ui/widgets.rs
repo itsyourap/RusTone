@@ -148,6 +148,13 @@ pub fn card<R>(ui: &mut Ui, p: &Palette, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner
 }
 
+/// A paragraph of small text that wraps ragged-right. A plain label in a
+/// justified column (the settings window's) stretches its wrapped lines to
+/// the full width, spreading the words apart.
+pub fn note(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.label(text)).inner
+}
+
 /// A settings row: title and optional description on the left, control on the right.
 /// The text wraps in the space the control leaves.
 pub fn setting_row(ui: &mut Ui, p: &Palette, title: &str, description: Option<&str>, control: impl FnOnce(&mut Ui)) {

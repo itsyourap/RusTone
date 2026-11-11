@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use egui::Ui;
 use rustone_core::config_file::{self, ConfigFile};
 
-use super::widgets::card;
+use super::widgets::{self, card};
 use crate::app::App;
 use crate::theme::Palette;
 
@@ -83,7 +83,7 @@ pub fn section(ui: &mut Ui, app: &mut App, p: &Palette) {
 
 fn idle(ui: &mut Ui, app: &mut App, p: &Palette) {
     let waiting = matches!(app.ui.transfer.mode, Transfer::Waiting(_));
-    ui.label(egui::RichText::new("All settings, codec order and speed dial included, and the accounts you choose, in a JSON file to keep or to set up another computer.").size(12.0).color(p.dim));
+    widgets::note(ui, egui::RichText::new("All settings, codec order and speed dial included, and the accounts you choose, in a JSON file to keep or to set up another computer.").size(12.0).color(p.dim));
     ui.horizontal(|ui| {
         if ui.add_enabled(!waiting, egui::Button::new("Export…")).clicked() {
             app.ui.transfer = TransferState { mode: Transfer::Export { selected: BTreeSet::new() }, status: None };
@@ -106,7 +106,7 @@ fn idle(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
     });
     if let Some((text, error)) = &app.ui.transfer.status {
-        ui.label(egui::RichText::new(text).size(12.0).color(if *error { p.danger } else { p.success }));
+        widgets::note(ui, egui::RichText::new(text).size(12.0).color(if *error { p.danger } else { p.success }));
     }
 }
 
@@ -122,7 +122,7 @@ fn export(ui: &mut Ui, app: &mut App, p: &Palette) {
     let Transfer::Export { selected } = &mut app.ui.transfer.mode else { return };
     ui.label(egui::RichText::new("Export the settings and these accounts:").size(13.0).color(p.secondary));
     if app.settings.accounts.is_empty() {
-        ui.label(egui::RichText::new("No accounts: the settings only.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("No accounts: the settings only.").size(12.0).color(p.dim));
     }
     for account in &app.settings.accounts {
         let mut checked = selected.contains(&account.id);
@@ -135,7 +135,7 @@ fn export(ui: &mut Ui, app: &mut App, p: &Palette) {
         }
     }
     if !selected.is_empty() {
-        ui.label(egui::RichText::new("Their passwords are saved in the file as plain text: keep it somewhere safe.").size(12.0).color(p.warning));
+        widgets::note(ui, egui::RichText::new("Their passwords are saved in the file as plain text: keep it somewhere safe.").size(12.0).color(p.warning));
     }
     let mut cancel = false;
     let mut save = false;
@@ -152,7 +152,7 @@ fn export(ui: &mut Ui, app: &mut App, p: &Palette) {
         let (tx, rx) = mpsc::channel();
         let ctx = ui.ctx().clone();
         std::thread::spawn(move || {
-            let outcome = match rfd::FileDialog::new().set_title("Export RusTone settings").add_filter("RusTone settings", &["json"]).set_file_name("RusTone settings.json").save_file() {
+            let outcome = match rfd::FileDialog::new().set_title("Export RusTone settings").add_filter("RusTone settings", &["json"]).set_file_name("RusTone.settings.json").save_file() {
                 None => Outcome::Cancelled,
                 Some(path) => match std::fs::write(&path, text) {
                     Ok(()) => Outcome::Exported(path, count),
@@ -170,11 +170,11 @@ fn import(ui: &mut Ui, app: &mut App, p: &Palette) {
     let Transfer::Import { path, file, selected } = &mut app.ui.transfer.mode else { return };
     ui.label(egui::RichText::new(format!("Import {}", file_name(path))).size(13.0).color(p.secondary));
     if !file.exported_by.is_empty() {
-        ui.label(egui::RichText::new(format!("Exported by {}", file.exported_by)).size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new(format!("Exported by {}", file.exported_by)).size(12.0).color(p.dim));
     }
-    ui.label(egui::RichText::new("Its settings replace yours. Your accounts stay; add these:").size(12.0).color(p.dim));
+    widgets::note(ui, egui::RichText::new("Its settings replace yours. Your accounts stay; add these:").size(12.0).color(p.dim));
     if file.accounts.is_empty() {
-        ui.label(egui::RichText::new("The file has no accounts: the settings only.").size(12.0).color(p.dim));
+        widgets::note(ui, egui::RichText::new("The file has no accounts: the settings only.").size(12.0).color(p.dim));
     }
     for (i, exported) in file.accounts.iter().enumerate() {
         let a = &exported.account;
