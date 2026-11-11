@@ -421,6 +421,7 @@ pub fn account_config(a: &Account, sip: &rustone_core::settings::SipSettings) ->
         ice: a.ice,
         allow_rewrite: a.allow_rewrite,
         disable_session_timer: a.disable_session_timer,
+        initial_auth: a.initial_auth,
         mwi: !a.voicemail_number.trim().is_empty(),
         hide_cid: a.hide_cid,
     }
@@ -497,6 +498,7 @@ mod tests {
             password: "pw".into(),
             transport: Transport::Tls,
             ip_version: IpVersion::PreferIpv6,
+            initial_auth: true,
             voicemail_number: "*86".into(),
             ..Account::default()
         };
@@ -506,6 +508,7 @@ mod tests {
         assert_eq!(c.proxies, ["192.168.29.1:5068"]);
         assert_eq!(c.transport, sip_engine::Transport::Tls);
         assert_eq!(c.ip_version, sip_engine::IpVersion::PreferIpv6);
+        assert!(c.initial_auth);
         assert!(c.mwi);
         assert_eq!(c.password, "pw");
         // Own DNS servers without SRV: explicit ports.

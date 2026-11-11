@@ -314,7 +314,7 @@ impl Session {
         ac.cred_count = 1;
         let cred = &mut ac.cred_info[0];
         cred.username = arena.pj(a.auth_user());
-        cred.realm = arena.pj("*");
+        cred.realm = arena.pj(&a.auth_realm());
         cred.scheme = arena.pj("Digest");
         cred.data_type = PJSIP_CRED_DATA_PLAIN_PASSWD as c_int;
         cred.data = arena.pj(&a.password);
@@ -394,6 +394,7 @@ impl Session {
             ac.vid_wnd_flags = video::WND_BORDER | video::WND_RESIZABLE;
         }
         ac.mwi_enabled = a.mwi.into();
+        ac.auth_pref.initial_auth = a.initial_auth.into();
         // Which of the server's addresses pjsua tries (pjsua's transport
         // selector filters and orders them), and the Contact's and media's
         // IP version. pjsua's own default is dual-stack.

@@ -86,6 +86,9 @@ pub struct Account {
     pub ice: bool,
     pub allow_rewrite: bool,
     pub disable_session_timer: bool,
+    /// Send an empty Digest Authorization header in requests before the
+    /// server challenges (IMS networks want it in the first REGISTER).
+    pub initial_auth: bool,
 }
 
 impl Default for Account {
@@ -114,6 +117,7 @@ impl Default for Account {
             ice: false,
             allow_rewrite: false,
             disable_session_timer: false,
+            initial_auth: false,
         }
     }
 }

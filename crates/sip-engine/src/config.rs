@@ -162,6 +162,9 @@ pub struct AccountConfig {
     /// Rewrite Via/Contact/SDP with the address the server sees.
     pub allow_rewrite: bool,
     pub disable_session_timer: bool,
+    /// Send an empty Authorization header before the first challenge
+    /// (pjsua's `auth_pref.initial_auth`), for IMS registrars.
+    pub initial_auth: bool,
     /// Subscribe to message-waiting indications (on
     /// when a voicemail number is set).
     pub mwi: bool,
@@ -189,6 +192,7 @@ impl Default for AccountConfig {
             ice: false,
             allow_rewrite: false,
             disable_session_timer: false,
+            initial_auth: false,
             mwi: false,
             hide_cid: false,
         }
@@ -219,6 +223,18 @@ impl AccountConfig {
         }
         uri.push_str(self.transport_suffix());
         format!("<{uri}>")
+    }
+
+    /// The realm of the account's credentials. Any realm (`*`), except
+    /// with an initial Authorization header, whose realm it is: the domain
+    /// (an IMS home domain), else the server's host.
+    pub fn auth_realm(&self) -> String {
+        if !self.initial_auth {
+            return "*".into();
+        }
+        let host = if self.domain.is_empty() { self.server.as_str() } else { self.domain.as_str() };
+        let host = host.strip_prefix('[').map_or_else(|| host.split(':').next().unwrap_or(host), |h| h.split(']').next().unwrap_or(h));
+        host.to_owned()
     }
 
     /// Account identity: `"Display" <sip:..>`.
@@ -281,6 +297,18 @@ mod tests {
         assert_eq!(acc.proxy_uris(), ["sip:192.168.29.1:5068;transport=tls;lr"]);
         assert_eq!(acc.sip_uri("1234"), "<sip:1234@192.168.29.1:5068;transport=tls>");
         assert_eq!(acc.auth_user(), acc.username);
+    }
+
+    #[test]
+    fn initial_auth_uses_the_domain_as_realm() {
+        let mut acc = AccountConfig { server: "sip.ims.example:5061".into(), domain: "ims.example".into(), ..AccountConfig::default() };
+        assert_eq!(acc.auth_realm(), "*", "any realm without an initial header");
+        acc.initial_auth = true;
+        assert_eq!(acc.auth_realm(), "ims.example");
+        acc.domain.clear();
+        assert_eq!(acc.auth_realm(), "sip.ims.example");
+        acc.server = "[2001:db8::1]:5061".into();
+        assert_eq!(acc.auth_realm(), "2001:db8::1");
     }
 
     #[test]
