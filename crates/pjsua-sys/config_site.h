@@ -22,3 +22,6 @@
 #define PJMEDIA_HAS_VPX_CODEC_VP9     0    //enable VP9 codec
 #define PJ_HAS_SSL_SOCK 1
 #define PJMEDIA_TXT_STREAM_MAX_RED_LEVELS 0
+// IPv6 transports, media and nameservers, and AAAA records in DNS SRV
+// lookups (an account chooses its IP version; IPv4 by default).
+#define PJ_HAS_IPV6 1
