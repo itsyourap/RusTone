@@ -3940,7 +3940,7 @@ dependencies = [
 
 [[package]]
 name = "pjsua-sys"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "rustone-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4514,7 +4514,7 @@ dependencies = [
 
 [[package]]
 name = "rustone-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "rustone-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "apple-native-keyring-store",
  "dbus-secret-service-keyring-store",
@@ -4544,7 +4544,7 @@ dependencies = [
 
 [[package]]
 name = "rustone-mac"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
@@ -4552,7 +4552,7 @@ dependencies = [
 
 [[package]]
 name = "rustone-win"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "windows 0.62.2",
 ]
@@ -4777,7 +4777,7 @@ dependencies = [
 
 [[package]]
 name = "sip-engine"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "jiff",
  "log",
