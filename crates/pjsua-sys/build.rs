@@ -127,20 +127,30 @@ mod windows {
         Pj { includes, defines: Vec::new() }
     }
 
-    /// Copies the runtime DLLs next to the binaries Cargo builds
-    /// (target/<profile>/ and target/<profile>/deps/ for tests), so the exe
-    /// starts without PATH changes.
+    /// Copies the runtime DLLs where the binaries Cargo builds find them
+    /// without PATH changes: next to the exe (target/<profile>/, where the
+    /// installers take them from too) and, for tests, into a folder of
+    /// OUT_DIR that Cargo puts on PATH when it runs them.
     fn copy_runtime_dlls(deps_dir: &Path) {
-        // OUT_DIR is target/<profile>/build/pjsua-sys-<hash>/out.
+        // OUT_DIR is target/<profile>/build/pjsua-sys-<hash>/out, or since
+        // Cargo 1.100 target/<profile>/build/pjsua-sys/<hash>/out: the
+        // profile folder is the one holding `build`.
         let out = PathBuf::from(env::var("OUT_DIR").unwrap());
-        let Some(profile_dir) = out.ancestors().nth(3) else { return };
+        let Some(profile_dir) = out.ancestors().find(|p| p.file_name().is_some_and(|n| n == "build")).and_then(Path::parent) else {
+            return;
+        };
+        // Test executables no longer sit in target/<profile>/deps (they run
+        // from their own build folders), but Cargo adds link search paths
+        // inside OUT_DIR to PATH for `cargo test` and `cargo run`.
+        let test_dlls = out.join("dlls");
+        println!("cargo:rustc-link-search=native={}", test_dlls.display());
         for name in &runtime_dlls() {
             let Some(src) = ["bin", "lib"].iter().map(|d| deps_dir.join(d).join(name)).find(|p| p.is_file()) else {
                 println!("cargo:warning={name} not found in {}\\{{bin,lib}}", deps_dir.display());
                 continue;
             };
             println!("cargo:rerun-if-changed={}", src.display());
-            for dir in [profile_dir.to_path_buf(), profile_dir.join("deps")] {
+            for dir in [profile_dir.to_path_buf(), profile_dir.join("deps"), test_dlls.clone()] {
                 let dst = dir.join(name);
                 let same = std::fs::metadata(&dst)
                     .ok()
